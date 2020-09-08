@@ -4,6 +4,7 @@ import keras
 from keras.layers import Conv2D,Dense,Dropout,Flatten
 from keras.models import Sequential
 import numpy as np
+from utils import getBigwigFileList, getMatrixFromCooler
 
 @click.option("--trainmatrix","-tm",required=True,
                     type=click.Path(exists=True,dir_okay=False,readable=True),
@@ -14,11 +15,12 @@ import numpy as np
 @click.option("--outputPath", "-o", required=True,
                     type=click.Path(exists=True,file_okay=False,writable=True),
                     help="Output path where trained network will be stored")
+@click.option("--chromosome", "-chrom", required=True,
+              type=str, default="1", help="chromosome to train on")
 @click.command()
-def training(trainmatrix, chromatinpath, outputpath):
-    
+def training(trainmatrix, chromatinpath, outputpath, chromosome):
+
     #constants
-    nr_Factors = 10 #testing only
     windowSize_bins = 80
     chromLength_bins = 3 * windowSize_bins
     matrixSize_bins = int(1/2 * windowSize_bins * (windowSize_bins + 1))
@@ -28,16 +30,40 @@ def training(trainmatrix, chromatinpath, outputpath):
     nr_neurons3 = 1690
     nr_neurons4 = matrixSize_bins
     nr_epochs = 10
-    ##random input for now
-    np.random.seed(42)
-    input_train = np.random.rand(1, nr_Factors, chromLength_bins, 1)
-    target_train = np.random.rand(1, matrixSize_bins)
-    
+       
     #check inputs
-
+    ##check chromatin files first
+    bigwigFileList = getBigwigFileList(chromatinpath)
+    if len(bigwigFileList) == 0:
+        msg = "No bigwig files (*.bigwig, *.bigWig, *.bw) found in {:s}"
+        msg = msg.format(chromatinpath)
+        raise SystemExit(msg)
+    ##load relevant part of Hi-C matrix
+    sparseHiCMatrix = getMatrixFromCooler(trainmatrix,chromosome)
+    if sparseHiCMatrix == None:
+        msg = "Could not read HiC matrix {:s} for training, check inputs"
+        msg = msg.format(trainmatrix)
+        raise SystemExit(msg)
+    
     #compose inputs into useful dataset
+    ##todo: distance normalization, divide values in each side diagonal by their average
+    ##get all possible windowSize x windowSize matrices out of the original one
+    startIndex = windowSize_bins
+    nr_matrices = int((sparseHiCMatrix.shape[0] - 2*windowSize_bins) / windowSize_bins)
+    matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
+    for i in range(nr_matrices):
+        endIndex = i + startIndex + windowSize_bins
+        trainmatrix = sparseHiCMatrix.toarray()[i+startIndex:endIndex,i+startIndex:endIndex][np.triu_indices(windowSize_bins)]
+        matrixArray[i] = trainmatrix.reshape(1,matrixSize_bins)
     
     
+    ##random input for now
+    nr_Factors = len(bigwigFileList)
+    batchDimension = matrixArray.shape[0]
+    np.random.seed(42)
+    input_train = np.random.rand(batchDimension, nr_Factors, chromLength_bins, 1)
+    target_train = matrixArray
+
     #build neural network as described by Farre et al.
     model = Sequential()
     model.add(Conv2D(filters=1, 
