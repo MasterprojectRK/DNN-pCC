@@ -42,5 +42,14 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
         chromEndList = list(range(pBinSizeInt,chromsize,pBinSizeInt))
         chromEndList.append(chromsize)
         mergeType = 'mean'
-        binArray = np.array(bigwigFile.stats(chrom, 0, chromsize, nBins=len(chromStartList), type=mergeType))
+        binArray = np.array(bigwigFile.stats(chrom, 0, chromsize, nBins=len(chromStartList), type=mergeType)).astype("float32")
     return binArray
+
+def normalize1Darray(pArray):
+    # min-max normalization (0...1) for 1D arrays 
+    if pArray is None or pArray.ndim != 1 or pArray.size == 0:
+        msg = "cannot normalize empty array"
+        print(msg)
+        return pArray
+    normArray = (pArray - pArray.min()) / (pArray.max() - pArray.min())
+    return normArray

@@ -6,7 +6,7 @@ from keras.layers import Conv2D,Dense,Dropout,Flatten
 from keras.models import Sequential
 import numpy as np
 
-from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor
+from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, normalize1Darray
 from tqdm import tqdm
 
 @click.option("--trainmatrix","-tm",required=True,
@@ -33,6 +33,7 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
     nr_neurons3 = 1690
     nr_neurons4 = matrixSize_bins
     nr_epochs = 10
+    batchSize = 30
        
     #check inputs
     ##load relevant part of Hi-C matrix
@@ -61,32 +62,37 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
     ##todo: distance normalization, divide values in each side diagonal by their average
     ##get all possible windowSize x windowSize matrices out of the original one
     startIndex = windowSize_bins
-    nr_matrices = int(sparseHiCMatrix.shape[0] - 3*windowSize_bins + 1)
+    #nr_matrices = int(sparseHiCMatrix.shape[0] - 3*windowSize_bins + 1)
+    nr_matrices = 100
     matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
     for i in tqdm(range(nr_matrices),desc="composing training matrices"):
         endIndex = i + startIndex + windowSize_bins
         trainmatrix = sparseHiCMatrix.toarray()[i+startIndex:endIndex,i+startIndex:endIndex][np.triu_indices(windowSize_bins)]
-        matrixArray[i] = trainmatrix.reshape(1,matrixSize_bins)
+        matrixArray[i] = trainmatrix
     binnedChromatinFactorArray = np.empty(shape=(len(bigwigFileList),sparseHiCMatrix.shape[0]))
     ##bin the proteins
     for i in tqdm(range(len(bigwigFileList)),desc="binning chromatin factors"):
-        binnedChromatinFactorArray[i] = binChromatinFactor(bigwigFileList[i],binSizeInt,chromosome)
+        binnedChromatinFactorArray[i] = normalize1Darray(binChromatinFactor(bigwigFileList[i],binSizeInt,chromosome))
+    binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
     ##compose chromatin factor input for all possible matrices
-    chromatinFactorArray = np.empty(shape=(nr_matrices,len(bigwigFileList),3*windowSize_bins))
+    chromatinFactorArray = np.empty(shape=(nr_matrices,len(bigwigFileList),3*windowSize_bins,1))
     for i in tqdm(range(nr_matrices),desc="composing chromatin factors"):
         endIndex = i + 3*windowSize_bins
-        chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex]
+        chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
 
-    ##random input for now
     nr_Factors = len(bigwigFileList)
-    input_train = chromatinFactorArray
-    target_train = matrixArray
+    input_train = chromatinFactorArray[0:100,:,:,:]
+    target_train = matrixArray[0:100,:]
+
+    print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)))
+    print("matrix NANs", np.any(np.isnan(matrixArray)))
 
     #build neural network as described by Farre et al.
     model = Sequential()
     model.add(Conv2D(filters=1, 
                      kernel_size=(nr_Factors,kernelWidth), 
                      activation="sigmoid",
+                     data_format="channels_last",
                      input_shape=(nr_Factors,chromLength_bins,1)))
     model.add(Flatten())
     model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
@@ -103,7 +109,8 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
     #train the neural network
     model.fit(input_train, 
               target_train, 
-              epochs= nr_epochs)
+              epochs= nr_epochs,
+              batch_size=batchSize)
 
     #store the trained network
 
