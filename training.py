@@ -6,8 +6,14 @@ from keras.layers import Conv2D,Dense,Dropout,Flatten
 from keras.models import Sequential
 import numpy as np
 
-from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, normalize1Darray
+from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, normalize1Darray, showMatrix
 from tqdm import tqdm
+
+from numpy.random import seed
+seed(42)
+
+from tensorflow import set_random_seed
+set_random_seed(42)
 
 @click.option("--trainmatrix","-tm",required=True,
                     type=click.Path(exists=True,dir_okay=False,readable=True),
@@ -20,8 +26,11 @@ from tqdm import tqdm
                     help="Output path where trained network will be stored")
 @click.option("--chromosome", "-chrom", required=True,
               type=str, default="17", help="chromosome to train on")
+@click.option("--modelfilepath", "-mfp", required=True, 
+              type=click.Path(writable=True,dir_okay=False), 
+              default="./trainedModel", help="path+filename for trained model")
 @click.command()
-def training(trainmatrix, chromatinpath, outputpath, chromosome):
+def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
 
     #constants
     windowSize_bins = 80
@@ -69,6 +78,9 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
         endIndex = i + startIndex + windowSize_bins
         trainmatrix = sparseHiCMatrix.toarray()[i+startIndex:endIndex,i+startIndex:endIndex][np.triu_indices(windowSize_bins)]
         matrixArray[i] = trainmatrix
+    #plotMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
+    #plotMatrix[np.triu_indices(windowSize_bins)] = matrixArray[0]
+    #showMatrix(plotMatrix)
     binnedChromatinFactorArray = np.empty(shape=(len(bigwigFileList),sparseHiCMatrix.shape[0]))
     ##bin the proteins
     for i in tqdm(range(len(bigwigFileList)),desc="binning chromatin factors"):
@@ -79,15 +91,17 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
     for i in tqdm(range(nr_matrices),desc="composing chromatin factors"):
         endIndex = i + 3*windowSize_bins
         chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
-
+    #showMatrix(chromatinFactorArray[0].reshape(len(bigwigFileList),3*windowSize_bins))
     nr_Factors = len(bigwigFileList)
-    #input_train = chromatinFactorArray[0:100,:,:,:]
-    #target_train = matrixArray[0:100,:]
+    #input_train = chromatinFactorArray[0:nr_matrices,:,:,:]
+    #target_train = matrixArray[0:nr_matrices,:]
     input_train = chromatinFactorArray
     target_train = matrixArray
 
     print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)), np.count_nonzero(np.isnan(chromatinFactorArray)))
     print("matrix NANs", np.any(np.isnan(matrixArray)))
+    print("chromatin infs", np.any(np.isinf(chromatinFactorArray)))
+    print("matrix infs", np.any(np.isinf(matrixArray)))
 
     #build neural network as described by Farre et al.
     model = Sequential()
@@ -115,18 +129,17 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
               batch_size=batchSize)
 
     #store the trained network
+    keras.models.save_model(model,filepath=modelfilepath)
 
-    #random input and output just for testing
-    np.random.seed(111)
-    input_test = np.random.rand(1, nr_Factors, chromLength_bins, 1)
-    target_test = np.random.rand(1, matrixSize_bins)
+    #self-prediction just for testing
+    input_test = np.expand_dims(chromatinFactorArray[0,:,:,:],0)
+    target_test = np.expand_dims(matrixArray[0,:],0)
     loss = model.evaluate(x=input_test, y=target_test)
     print("loss: {:.3f}".format(loss))
     pred = model.predict(x=input_test)
-    print(pred[0:10])
-
-
-
+    predMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
+    predMatrix[np.triu_indices(windowSize_bins)] = pred[0] 
+    showMatrix(predMatrix)
 
 
 if __name__ == "__main__":
