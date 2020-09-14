@@ -3,3 +3,4 @@
 .vscode/.ropeproject/objectdb
 .vscode/launch.json
 *.pyc
+*.png
