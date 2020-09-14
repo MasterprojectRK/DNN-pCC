@@ -3,6 +3,8 @@ import os
 import cooler
 import pyBigWig
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 
 def getBigwigFileList(pDirectory):
     #returns a list of bigwig files in pDirectory
@@ -65,3 +67,12 @@ def normalize1Darray(pArray):
         return pArray
     normArray = (pArray - pArray.min()) / (pArray.max() - pArray.min())
     return normArray
+
+
+def showMatrix(pMatrix):
+    #test function to plot matrices
+    #not for production use
+    print(pMatrix.max())
+    plotmatrix = pMatrix + 1
+    plt.matshow(plotmatrix, cmap="Reds", norm=colors.LogNorm())
+    plt.show()
