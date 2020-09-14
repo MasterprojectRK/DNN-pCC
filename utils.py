@@ -43,6 +43,18 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
         chromEndList.append(chromsize)
         mergeType = 'mean'
         binArray = np.array(bigwigFile.stats(chrom, 0, chromsize, nBins=len(chromStartList), type=mergeType)).astype("float32")
+        nr_nan = np.count_nonzero(np.isnan(binArray))
+        nr_inf = np.count_nonzero(np.isinf(binArray))
+        if nr_inf != 0 or nr_nan != 0:
+            binArray = np.nan_to_num(binArray, nan=0.0, posinf=np.nanmax(binArray[binArray != np.inf]),neginf=0.0)
+        if nr_inf != 0:
+            msg_inf = "Warning: replaced {:d} infinity values in chromatin factor data by 0/max. numeric value in data"
+            msg_inf = msg_inf.format(nr_inf)
+            print(msg_inf)
+        if nr_nan != 0:
+            msg_nan = "Warning: replaced {:d} NANs in chromatin factor data by 0."
+            msg_nan = msg_nan.format(nr_nan)
+            print(msg_nan)
     return binArray
 
 def normalize1Darray(pArray):

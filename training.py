@@ -32,7 +32,7 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
     nr_neurons2 = 881
     nr_neurons3 = 1690
     nr_neurons4 = matrixSize_bins
-    nr_epochs = 10
+    nr_epochs = 500
     batchSize = 30
        
     #check inputs
@@ -62,8 +62,8 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
     ##todo: distance normalization, divide values in each side diagonal by their average
     ##get all possible windowSize x windowSize matrices out of the original one
     startIndex = windowSize_bins
-    #nr_matrices = int(sparseHiCMatrix.shape[0] - 3*windowSize_bins + 1)
-    nr_matrices = 100
+    nr_matrices = int(sparseHiCMatrix.shape[0] - 3*windowSize_bins + 1)
+    #nr_matrices = 100
     matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
     for i in tqdm(range(nr_matrices),desc="composing training matrices"):
         endIndex = i + startIndex + windowSize_bins
@@ -81,10 +81,12 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome):
         chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
 
     nr_Factors = len(bigwigFileList)
-    input_train = chromatinFactorArray[0:100,:,:,:]
-    target_train = matrixArray[0:100,:]
+    #input_train = chromatinFactorArray[0:100,:,:,:]
+    #target_train = matrixArray[0:100,:]
+    input_train = chromatinFactorArray
+    target_train = matrixArray
 
-    print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)))
+    print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)), np.count_nonzero(np.isnan(chromatinFactorArray)))
     print("matrix NANs", np.any(np.isnan(matrixArray)))
 
     #build neural network as described by Farre et al.
