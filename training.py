@@ -29,9 +29,9 @@ set_random_seed(35)
               type=str, default="17", help="chromosome to train on")
 @click.option("--modelfilepath", "-mfp", required=True, 
               type=click.Path(writable=True,dir_okay=False), 
-              default="./trainedModel", help="path+filename for trained model")
+              default="./trainedModel.tf", help="path+filename for trained model")
 @click.option("--learningRate", "-lr", required=True,
-                type=click.FloatRange(min=1e-10), default=1e-4,
+                type=click.FloatRange(min=1e-10), default=1e-5,
                 help="learning rate for stochastic gradient descent")
 @click.command()
 def training(trainmatrix,
@@ -50,7 +50,7 @@ def training(trainmatrix,
     nr_neurons2 = 881
     nr_neurons3 = 1690
     nr_neurons4 = matrixSize_bins
-    nr_epochs = 10
+    nr_epochs = 10000
     batchSize = 30
        
     #check inputs
@@ -107,11 +107,19 @@ def training(trainmatrix,
     choice = np.random.choice(range(nr_matrices), size=(int(0.8*nr_matrices)), replace=False)
     indices = np.zeros(nr_matrices, dtype=bool)
     indices[choice] = True
+    print("first training index", min(choice))
     
-    input_train = chromatinFactorArray[indices,:,:,:]
-    target_train = matrixArray[indices,:]
-    input_val = chromatinFactorArray[~indices,:,:,:]
-    target_val = matrixArray[~indices,:]
+    input_train = chromatinFactorArray[indices,:,:,:].astype("float32")
+    target_train = matrixArray[indices,:].astype("float32")
+    input_val = chromatinFactorArray[~indices,:,:,:].astype("float32")
+    target_val = matrixArray[~indices,:].astype("float32")
+
+    print(input_train.shape)
+    print(input_val.shape)
+    print(target_train.shape)
+    print(target_val.shape)
+    print(type(input_train))
+    print(type(target_train))
 
     print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)), np.count_nonzero(np.isnan(chromatinFactorArray)))
     print("matrix NANs", np.any(np.isnan(matrixArray)))
@@ -147,7 +155,9 @@ def training(trainmatrix,
     #store the trained network
     keras.models.save_model(model,filepath=modelfilepath)
 
+    #plot train- and validation loss over epochs
     utils.plotLoss(history)
+
     #self-prediction just for testing
     input_test = np.expand_dims(chromatinFactorArray[0,:,:,:],0)
     target_test = np.expand_dims(matrixArray[0,:],0)
@@ -157,6 +167,9 @@ def training(trainmatrix,
     predMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
     predMatrix[np.triu_indices(windowSize_bins)] = pred[0] 
     showMatrix(predMatrix)
+    targetMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
+    targetMatrix[np.triu_indices(windowSize_bins)] = matrixArray[0]
+    showMatrix(targetMatrix)
 
     pearson_r, pearson_p = pearsonr(matrixArray[0],pred[0])
     msg = "Pearson R = {:.3f}, Pearson p = {:.3f}"
@@ -165,7 +178,6 @@ def training(trainmatrix,
 
     mse = (np.square(matrixArray[0] - pred[0])).mean(axis=None)
     print("MSE", mse)
-
-
+    
 if __name__ == "__main__":
     training() #pylint: disable=no-value-for-parameter
