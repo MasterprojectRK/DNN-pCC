@@ -76,3 +76,12 @@ def showMatrix(pMatrix):
     plotmatrix = pMatrix + 1
     plt.matshow(plotmatrix, cmap="Reds", norm=colors.LogNorm())
     plt.show()
+
+def plotLoss(pKerasHistoryObject):
+    plt.plot(pKerasHistoryObject.history['loss'])
+    plt.plot(pKerasHistoryObject.history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'val'], loc='upper left')
+    plt.show()

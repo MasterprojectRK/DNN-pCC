@@ -138,7 +138,7 @@ def training(trainmatrix,
     model.summary()
     
     #train the neural network
-    model.fit(input_train, 
+    history = model.fit(input_train, 
               target_train, 
               epochs= nr_epochs,
               batch_size=batchSize,
@@ -147,6 +147,7 @@ def training(trainmatrix,
     #store the trained network
     keras.models.save_model(model,filepath=modelfilepath)
 
+    utils.plotLoss(history)
     #self-prediction just for testing
     input_test = np.expand_dims(chromatinFactorArray[0,:,:,:],0)
     target_test = np.expand_dims(matrixArray[0,:],0)
