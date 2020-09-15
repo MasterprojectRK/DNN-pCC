@@ -11,10 +11,10 @@ from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, no
 from tqdm import tqdm
 
 from numpy.random import seed
-seed(42)
+seed(35)
 
 from tensorflow import set_random_seed
-set_random_seed(42)
+set_random_seed(35)
 
 @click.option("--trainmatrix","-tm",required=True,
                     type=click.Path(exists=True,dir_okay=False,readable=True),
@@ -42,7 +42,7 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
     nr_neurons2 = 881
     nr_neurons3 = 1690
     nr_neurons4 = matrixSize_bins
-    nr_epochs = 500
+    nr_epochs = 10
     batchSize = 30
        
     #check inputs
@@ -125,7 +125,7 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
     model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=keras.optimizers.SGD(), 
+    model.compile(optimizer=keras.optimizers.SGD(learning_rate=1e-3), 
                   loss=keras.losses.MeanSquaredError())
     model.summary()
     
