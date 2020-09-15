@@ -95,8 +95,14 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
     nr_Factors = len(bigwigFileList)
     #input_train = chromatinFactorArray[0:nr_matrices,:,:,:]
     #target_train = matrixArray[0:nr_matrices,:]
-    input_train = chromatinFactorArray
-    target_train = matrixArray
+    choice = np.random.choice(range(nr_matrices), size=(int(0.8*nr_matrices)), replace=False)
+    indices = np.zeros(nr_matrices, dtype=bool)
+    indices[choice] = True
+    
+    input_train = chromatinFactorArray[indices,:,:,:]
+    target_train = matrixArray[indices,:]
+    input_val = chromatinFactorArray[~indices,:,:,:]
+    target_val = matrixArray[~indices,:]
 
     print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)), np.count_nonzero(np.isnan(chromatinFactorArray)))
     print("matrix NANs", np.any(np.isnan(matrixArray)))
@@ -126,7 +132,8 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
     model.fit(input_train, 
               target_train, 
               epochs= nr_epochs,
-              batch_size=batchSize)
+              batch_size=batchSize,
+              validation_data=(input_val,target_val))
 
     #store the trained network
     keras.models.save_model(model,filepath=modelfilepath)
