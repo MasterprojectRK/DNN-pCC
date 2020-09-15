@@ -5,6 +5,7 @@ import keras
 from keras.layers import Conv2D,Dense,Dropout,Flatten
 from keras.models import Sequential
 import numpy as np
+from scipy.stats import pearsonr
 
 from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, normalize1Darray, showMatrix
 from tqdm import tqdm
@@ -147,6 +148,14 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
     predMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
     predMatrix[np.triu_indices(windowSize_bins)] = pred[0] 
     showMatrix(predMatrix)
+
+    pearson_r, pearson_p = pearsonr(matrixArray[0],pred[0])
+    msg = "Pearson R = {:.3f}, Pearson p = {:.3f}"
+    msg = msg.format(pearson_r, pearson_p)
+    print(msg)
+
+    mse = (np.square(matrixArray[0] - pred[0])).mean(axis=None)
+    print("MSE", mse)
 
 
 if __name__ == "__main__":
