@@ -30,8 +30,16 @@ set_random_seed(35)
 @click.option("--modelfilepath", "-mfp", required=True, 
               type=click.Path(writable=True,dir_okay=False), 
               default="./trainedModel", help="path+filename for trained model")
+@click.option("--learningRate", "-lr", required=True,
+                type=click.FloatRange(min=1e-10), default=1e-4,
+                help="learning rate for stochastic gradient descent")
 @click.command()
-def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
+def training(trainmatrix,
+            chromatinpath,
+            outputpath,
+            chromosome,
+            modelfilepath,
+            learningrate):
 
     #constants
     windowSize_bins = 80
@@ -125,7 +133,7 @@ def training(trainmatrix, chromatinpath, outputpath, chromosome, modelfilepath):
     model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=keras.optimizers.SGD(learning_rate=1e-3), 
+    model.compile(optimizer=keras.optimizers.SGD(learning_rate=learningrate), 
                   loss=keras.losses.MeanSquaredError())
     model.summary()
     
