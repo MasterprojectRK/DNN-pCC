@@ -94,12 +94,12 @@ def rebuildMatrix(pArrayOfTriangles, pWindowSize):
     nr_matrices = pArrayOfTriangles.shape[0]
     sum_matrix = np.zeros((nr_matrices-1+3*pWindowSize,nr_matrices-1+3*pWindowSize))
     count_matrix = np.zeros_like(sum_matrix,dtype=int)    
+    mean_matrix = np.zeros_like(sum_matrix,dtype="float32")
     #sum up all the triangular matrices, shifting by one along the diag. for each matrix
     for i in tqdm(range(nr_matrices), desc="rebuilding matrix"):
         j = i + pWindowSize
         k = j + pWindowSize
         sum_matrix[j:k,j:k][np.triu_indices(pWindowSize)] += pArrayOfTriangles[i]
         count_matrix[j:k,j:k] += np.ones((pWindowSize,pWindowSize),dtype=int) #keep track of how many matrices have contributed to each position
-    return_matrix = np.expand_dims(np.zeros_like(sum_matrix),axis=0)
-    np.divide(sum_matrix, count_matrix, where=[count_matrix!=0], out=return_matrix) #return the mean at each position
-    return return_matrix.reshape(sum_matrix.shape)
+    mean_matrix[count_matrix!=0] = sum_matrix[count_matrix!=0] / count_matrix[count_matrix!=0]
+    return mean_matrix
