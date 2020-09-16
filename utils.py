@@ -85,3 +85,18 @@ def plotLoss(pKerasHistoryObject):
     plt.xlabel('epoch')
     plt.legend(['train', 'val'], loc='upper left')
     plt.show()
+
+
+def rebuildMatrix(pArrayOfTriangles, pWindowSize):
+    #rebuilds the interaction matrix (a trapezoid along its diagonal)
+    #by taking the mean of all overlapping triangles
+    nr_matrices = pArrayOfTriangles.shape[0]
+    sum_matrix = np.zeros((nr_matrices-1+3*pWindowSize,nr_matrices-1+3*pWindowSize))
+    count_matrix = np.zeros_like(sum_matrix)    
+    #sum up all the triangular matrices, shifting by one along the diag. for each matrix
+    for i in range(nr_matrices):
+        j = i + pWindowSize
+        k = j + pWindowSize
+        sum_matrix[j:k,j:k][np.triu_indices(pWindowSize)] += pArrayOfTriangles[i]
+        count_matrix[j:k,j:k] += np.ones((pWindowSize,pWindowSize)) #keep track of how many matrices have contributed to each position
+    return np.divide(sum_matrix, count_matrix, where=[count_matrix!=0]) #return the mean at each position
