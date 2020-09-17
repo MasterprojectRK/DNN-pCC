@@ -7,7 +7,7 @@ from keras.models import Sequential
 import numpy as np
 from scipy.stats import pearsonr
 
-from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, normalize1Darray, showMatrix
+from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scale1Darray, showMatrix
 from tqdm import tqdm
 
 from numpy.random import seed
@@ -93,7 +93,7 @@ def training(trainmatrix,
     binnedChromatinFactorArray = np.empty(shape=(len(bigwigFileList),sparseHiCMatrix.shape[0]))
     ##bin the proteins
     for i in tqdm(range(len(bigwigFileList)),desc="binning chromatin factors"):
-        binnedChromatinFactorArray[i] = normalize1Darray(binChromatinFactor(bigwigFileList[i],binSizeInt,chromosome))
+        binnedChromatinFactorArray[i] = scale1Darray(binChromatinFactor(bigwigFileList[i],binSizeInt,chromosome))
     binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
     ##compose chromatin factor input for all possible matrices
     chromatinFactorArray = np.empty(shape=(nr_matrices,len(bigwigFileList),3*windowSize_bins,1))

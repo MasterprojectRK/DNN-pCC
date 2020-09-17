@@ -60,8 +60,8 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
             print(msg_nan)
     return binArray
 
-def normalize1Darray(pArray):
-    # min-max normalization (0...1) for 1D arrays 
+def scale1Darray(pArray):
+    # min-max scaling (0...1) for 1D arrays 
     if pArray is None or pArray.ndim != 1 or pArray.size == 0:
         msg = "cannot normalize empty array"
         print(msg)
