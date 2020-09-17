@@ -3,6 +3,7 @@ import os
 import cooler
 import pyBigWig
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from tqdm import tqdm
@@ -91,6 +92,7 @@ def plotLoss(pKerasHistoryObject):
 def rebuildMatrix(pArrayOfTriangles, pWindowSize):
     #rebuilds the interaction matrix (a trapezoid along its diagonal)
     #by taking the mean of all overlapping triangles
+    #returns an interaction matrix as a numpy ndarray
     nr_matrices = pArrayOfTriangles.shape[0]
     sum_matrix = np.zeros((nr_matrices-1+3*pWindowSize,nr_matrices-1+3*pWindowSize))
     count_matrix = np.zeros_like(sum_matrix,dtype=int)    
@@ -103,3 +105,38 @@ def rebuildMatrix(pArrayOfTriangles, pWindowSize):
         count_matrix[j:k,j:k] += np.ones((pWindowSize,pWindowSize),dtype=int) #keep track of how many matrices have contributed to each position
     mean_matrix[count_matrix!=0] = sum_matrix[count_matrix!=0] / count_matrix[count_matrix!=0]
     return mean_matrix
+
+
+def writeCooler(pMatrix, pBinSizeInt, pOutfile, pChromosome, pChromSize=None,  pMetadata=None):
+    #takes a matrix as numpy array and writes a cooler matrix from it
+    #widely copied from study project
+    
+    #the chromosome size may not be integer-divisible by the bin size
+    #so specifying the real chrom size is possible, but the
+    #number of bins must still correspond to the matrix size
+    chromSizeInt = int(pMatrix.shape[0] * pBinSizeInt)
+    if pChromSize is not None \
+                and pChromSize > (chromSizeInt - pBinSizeInt)\
+                and pChromSize < chromSizeInt:
+        chromSizeInt = int(pChromSize)
+        
+    #create the bins for cooler
+    bins = pd.DataFrame(columns=['chrom','start','end'])
+    binStartList = list(range(0, chromSizeInt, int(pBinSizeInt)))
+    binEndList = list(range(int(pBinSizeInt), chromSizeInt, int(pBinSizeInt)))
+    binEndList.append(chromSizeInt)
+    bins['start'] = binStartList
+    bins['end'] = binEndList
+    bins['chrom'] = str(pChromosome)
+
+    #create the pixels for cooler
+    triu_Indices = np.triu_indices(pMatrix.shape[0])
+    pixels = pd.DataFrame(columns=['bin1_id','bin2_id','count'])
+    pixels['bin1_id'] = triu_Indices[0]
+    pixels['bin2_id'] = triu_Indices[1]
+    readCounts = pMatrix[triu_Indices]
+    pixels['count'] = np.float64(readCounts)
+    pixels.sort_values(by=['bin1_id','bin2_id'],inplace=True)
+
+    #write out the cooler
+    cooler.create_cooler(pOutfile, bins=bins, pixels=pixels, dtypes={'count': np.float64}, metadata=pMetadata)
