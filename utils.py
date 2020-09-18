@@ -106,6 +106,20 @@ def rebuildMatrix(pArrayOfTriangles, pWindowSize):
     mean_matrix[count_matrix!=0] = sum_matrix[count_matrix!=0] / count_matrix[count_matrix!=0]
     return mean_matrix
 
+def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
+    #get all possible (overlapping) windowSize x windowSize matrices out of the original one
+    #and put them into a numpy array
+    #ignore the first windowSize matrices because of the window approach by Farre et al.
+    matrixSize_bins = int(1/2 * pWindowSize_bins * (pWindowSize_bins + 1)) #always an integer because even*odd=even
+    nr_matrices = int(pSparseMatrix.shape[0] - 3*pWindowSize_bins + 1)
+    #nr_matrices = 100
+    matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
+    for i in tqdm(range(nr_matrices),desc="composing training matrices"):
+        j = i + pWindowSize_bins
+        k = j + pWindowSize_bins
+        trainmatrix = pSparseMatrix.toarray()[j:k,j:k][np.triu_indices(pWindowSize_bins)]
+        matrixArray[i] = trainmatrix
+    return matrixArray
 
 def writeCooler(pMatrix, pBinSizeInt, pOutfile, pChromosome, pChromSize=None,  pMetadata=None):
     #takes a matrix as numpy array and writes a cooler matrix from it
