@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from tqdm import tqdm
+from scipy import sparse
 
 def getBigwigFileList(pDirectory):
     #returns a list of bigwig files in pDirectory
@@ -154,3 +155,13 @@ def writeCooler(pMatrix, pBinSizeInt, pOutfile, pChromosome, pChromSize=None,  p
 
     #write out the cooler
     cooler.create_cooler(pOutfile, bins=bins, pixels=pixels, dtypes={'count': np.float64}, metadata=pMetadata)
+
+def distanceNormalize(pSparseCooMatrix, pWindowSize_bins):
+    #compute the means along the diagonals (= same distance)
+    #and divide all values on the diagonals by their respective mean
+    diagList = []
+    for i in range(pWindowSize_bins):
+        diagArr = sparse.coo_matrix.diagonal(pSparseCooMatrix,i)
+        diagList.append(diagArr/diagArr.mean())
+    distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins))
+    return distNormalizedMatrix
