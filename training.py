@@ -56,7 +56,7 @@ def training(trainmatrix,
     #check inputs
     ##load relevant part of Hi-C matrix
     sparseHiCMatrix, binSizeInt  = getMatrixFromCooler(trainmatrix,chromosome)
-    if sparseHiCMatrix == None:
+    if sparseHiCMatrix is None:
         msg = "Could not read HiC matrix {:s} for training, check inputs"
         msg = msg.format(trainmatrix)
         raise SystemExit(msg)
@@ -79,14 +79,7 @@ def training(trainmatrix,
     #compose inputs into useful dataset
     ##todo: distance normalization, divide values in each side diagonal by their average
     ##get all possible windowSize x windowSize matrices out of the original one
-    startIndex = windowSize_bins
-    nr_matrices = int(sparseHiCMatrix.shape[0] - 3*windowSize_bins + 1)
-    #nr_matrices = 100
-    matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
-    for i in tqdm(range(nr_matrices),desc="composing training matrices"):
-        endIndex = i + startIndex + windowSize_bins
-        trainmatrix = sparseHiCMatrix.toarray()[i+startIndex:endIndex,i+startIndex:endIndex][np.triu_indices(windowSize_bins)]
-        matrixArray[i] = trainmatrix
+    matrixArray = utils.buildMatrixArray(sparseHiCMatrix, windowSize_bins)
     #plotMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
     #plotMatrix[np.triu_indices(windowSize_bins)] = matrixArray[0]
     #showMatrix(plotMatrix)
@@ -96,6 +89,7 @@ def training(trainmatrix,
         binnedChromatinFactorArray[i] = scale1Darray(binChromatinFactor(bigwigFileList[i],binSizeInt,chromosome))
     binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
     ##compose chromatin factor input for all possible matrices
+    nr_matrices = matrixArray.shape[0]
     chromatinFactorArray = np.empty(shape=(nr_matrices,len(bigwigFileList),3*windowSize_bins,1))
     for i in tqdm(range(nr_matrices),desc="composing chromatin factors"):
         endIndex = i + 3*windowSize_bins
