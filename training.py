@@ -33,25 +33,33 @@ set_random_seed(35)
 @click.option("--learningRate", "-lr", required=True,
                 type=click.FloatRange(min=1e-10), default=1e-5,
                 help="learning rate for stochastic gradient descent")
+@click.option("--numberEpochs", "-ep", required=True,
+                type=click.IntRange(min=20), default=1000,
+                help="number of epochs for training the neural network")
+@click.option("--batchsize", "-bs", required=True,
+                type=click.IntRange(min=5), default=30,
+                help="batch size for training the neural network")
+@click.option("--windowsize", "-ws", required=True,
+                type=click.IntRange(min=10), default=80,
+                help="Window size (in bins) for composing training data")
 @click.command()
 def training(trainmatrix,
             chromatinpath,
             outputpath,
             chromosome,
             modelfilepath,
-            learningrate):
+            learningrate,
+            numberepochs,
+            batchsize,
+            windowsize):
 
     #constants
-    windowSize_bins = 80
-    chromLength_bins = 3 * windowSize_bins
-    matrixSize_bins = int(1/2 * windowSize_bins * (windowSize_bins + 1))
+    chromLength_bins = 3 * windowsize
     kernelWidth = 1
     nr_neurons1 = 460
     nr_neurons2 = 881
     nr_neurons3 = 1690
-    nr_neurons4 = matrixSize_bins
-    nr_epochs = 10000
-    batchSize = 30
+    nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
        
     #check inputs
     ##load relevant part of Hi-C matrix
@@ -76,28 +84,33 @@ def training(trainmatrix,
     for factor in bigwigFileList:
         print(factor)
     
-    #compose inputs into useful dataset
-    ##todo: distance normalization, divide values in each side diagonal by their average
-    ##get all possible windowSize x windowSize matrices out of the original one
-    matrixArray = utils.buildMatrixArray(sparseHiCMatrix, windowSize_bins)
+    #matrix distance normalization, divide values in each side diagonal by their average
+    ##possible and even quite fast, but doesn't look reasonable
+    ##sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, windowsize)
+    
+    #get all possible windowSize x windowSize matrices out of the original one
+    matrixArray = utils.buildMatrixArray(sparseHiCMatrix, windowsize)
     #plotMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
     #plotMatrix[np.triu_indices(windowSize_bins)] = matrixArray[0]
     #showMatrix(plotMatrix)
-    binnedChromatinFactorArray = np.empty(shape=(len(bigwigFileList),sparseHiCMatrix.shape[0]))
-    ##bin the proteins
-    for i in tqdm(range(len(bigwigFileList)),desc="binning chromatin factors"):
-        binnedChromatinFactorArray[i] = scale1Darray(binChromatinFactor(bigwigFileList[i],binSizeInt,chromosome))
-    binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
-    ##compose chromatin factor input for all possible matrices
+    
+    #build the chromatin factor array (2D matrix with depth 1 = 3D)
+    #for each of the matrices taken from the original Hi-C matrix
+    chromatinFactorArray = utils.composeChromatinFactors(bigwigFileList,
+                                                           pChromLength_bins=sparseHiCMatrix.shape[0], 
+                                                           pBinSizeInt=binSizeInt,
+                                                           pChromosomeStr=chromosome,
+                                                           pWindowSize_bins=windowsize)
+    #sanity check, should have the same numbers of training and target data
+    if chromatinFactorArray.shape[0] != matrixArray.shape[0]:
+        msg = "number of chromatin factor matrices ({:d})"
+        msg += "doesn't match number of training matrices ({:d})"
+        msg = msg.format(chromatinFactorArray.shape[0], matrixArray.shape[0])
+        raise SystemExit(msg)
+
+    nr_Factors = chromatinFactorArray.shape[1]
     nr_matrices = matrixArray.shape[0]
-    chromatinFactorArray = np.empty(shape=(nr_matrices,len(bigwigFileList),3*windowSize_bins,1))
-    for i in tqdm(range(nr_matrices),desc="composing chromatin factors"):
-        endIndex = i + 3*windowSize_bins
-        chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
-    #showMatrix(chromatinFactorArray[0].reshape(len(bigwigFileList),3*windowSize_bins))
-    nr_Factors = len(bigwigFileList)
-    #input_train = chromatinFactorArray[0:nr_matrices,:,:,:]
-    #target_train = matrixArray[0:nr_matrices,:]
+    #split the input into train and validation set
     choice = np.random.choice(range(nr_matrices), size=(int(0.8*nr_matrices)), replace=False)
     indices = np.zeros(nr_matrices, dtype=bool)
     indices[choice] = True
@@ -112,10 +125,8 @@ def training(trainmatrix,
     print(input_val.shape)
     print(target_train.shape)
     print(target_val.shape)
-    print(type(input_train))
-    print(type(target_train))
 
-    print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)), np.count_nonzero(np.isnan(chromatinFactorArray)))
+    print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)))
     print("matrix NANs", np.any(np.isnan(matrixArray)))
     print("chromatin infs", np.any(np.isinf(chromatinFactorArray)))
     print("matrix infs", np.any(np.isinf(matrixArray)))
@@ -142,8 +153,8 @@ def training(trainmatrix,
     #train the neural network
     history = model.fit(input_train, 
               target_train, 
-              epochs= nr_epochs,
-              batch_size=batchSize,
+              epochs= numberepochs,
+              batch_size=batchsize,
               validation_data=(input_val,target_val))
 
     #store the trained network
@@ -158,11 +169,11 @@ def training(trainmatrix,
     loss = model.evaluate(x=input_test, y=target_test)
     print("loss: {:.3f}".format(loss))
     pred = model.predict(x=input_test)
-    predMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
-    predMatrix[np.triu_indices(windowSize_bins)] = pred[0] 
+    predMatrix = np.zeros(shape=(windowsize,windowsize))
+    predMatrix[np.triu_indices(windowsize)] = pred[0] 
     showMatrix(predMatrix)
-    targetMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
-    targetMatrix[np.triu_indices(windowSize_bins)] = matrixArray[0]
+    targetMatrix = np.zeros(shape=(windowsize,windowsize))
+    targetMatrix[np.triu_indices(windowsize)] = matrixArray[0]
     showMatrix(targetMatrix)
 
     pearson_r, pearson_p = pearsonr(matrixArray[0],pred[0])
