@@ -115,7 +115,7 @@ def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
     nr_matrices = int(pSparseMatrix.shape[0] - 3*pWindowSize_bins + 1)
     #nr_matrices = 100
     matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
-    for i in tqdm(range(nr_matrices),desc="composing training matrices"):
+    for i in tqdm(range(nr_matrices),desc="composing matrices"):
         j = i + pWindowSize_bins
         k = j + pWindowSize_bins
         trainmatrix = pSparseMatrix.toarray()[j:k,j:k][np.triu_indices(pWindowSize_bins)]
@@ -165,3 +165,17 @@ def distanceNormalize(pSparseCooMatrix, pWindowSize_bins):
         diagList.append(diagArr/diagArr.mean())
     distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins))
     return distNormalizedMatrix
+
+def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pWindowSize_bins ):
+    binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
+    ##bin the single proteins
+    for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
+        binnedChromatinFactorArray[i] = scale1Darray(binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr))
+    binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
+    ##compose chromatin factor input for all possible matrices
+    nr_matrices = int(binnedChromatinFactorArray.shape[1] - 3*pWindowSize_bins + 1)
+    chromatinFactorArray = np.empty(shape=(nr_matrices,len(pBigwigFileList),3*pWindowSize_bins,1))
+    for i in tqdm(range(nr_matrices),desc="composing chromatin factors"):
+        endIndex = i + 3*pWindowSize_bins
+        chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
+    return chromatinFactorArray
