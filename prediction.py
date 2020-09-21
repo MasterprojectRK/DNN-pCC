@@ -1,4 +1,4 @@
-from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler
+from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler,scaleArray
 import click
 import keras
 import numpy as np
@@ -18,12 +18,16 @@ import numpy as np
                     help="Path+Filename of trained model")
 @click.option("--chromosome", "-chrom", required=True,
                     type=str, default="17", help="chromosome to predict")
+@click.option("--multiplier", "-mul", required=False,
+                    type=click.FloatRange(min=1.0, max=50000), default=1.0,
+                    help="Predicted matrices are scaled to value range 0...1.\n Use --multiplier mmm to get range 0...mmm e.g. for better visualization")
 @click.command()
 def prediction(validationmatrix, 
                 chromatinpath, 
                 outputpath, 
                 trainedmodel,
-                chromosome):
+                chromosome,
+                multiplier):
     
     #load the trained model first, since it contains parameters
     #which must be matched by the remaining inputs
@@ -87,6 +91,9 @@ def prediction(validationmatrix,
       
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(x=chromatinFactorArray)
+    
+    #Scale to 0...1 and multiply with given multiplier for better visualization.
+    predMatrixArray = scaleArray(predMatrixArray) * multiplier
 
     #rebuild the cooler matrix from the predictions and write out
     meanMatrix = rebuildMatrix(predMatrixArray,windowsize)
