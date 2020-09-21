@@ -7,7 +7,7 @@ from tensorflow.keras.models import Sequential
 import numpy as np
 from scipy.stats import pearsonr
 
-from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scale1Darray, showMatrix
+from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scaleArray, showMatrix
 from tqdm import tqdm
 
 from numpy.random import seed
@@ -41,6 +41,9 @@ tf.random.set_seed(35)
 @click.option("--windowsize", "-ws", required=True,
                 type=click.IntRange(min=10), default=80,
                 help="Window size (in bins) for composing training data")
+@click.option("--scaleMatrix", "-scm", required=True,
+                type=bool, default=True,
+                help="Scale Hi-C matrix to [0...1]")
 @click.command()
 def training(trainmatrix,
             chromatinpath,
@@ -50,7 +53,8 @@ def training(trainmatrix,
             learningrate,
             numberepochs,
             batchsize,
-            windowsize):
+            windowsize,
+            scalematrix):
 
     #constants
     chromLength_bins = 3 * windowsize
@@ -89,9 +93,12 @@ def training(trainmatrix,
     
     #get all possible windowSize x windowSize matrices out of the original one
     matrixArray = utils.buildMatrixArray(sparseHiCMatrix, windowsize)
-    #plotMatrix = np.zeros(shape=(windowSize_bins,windowSize_bins))
-    #plotMatrix[np.triu_indices(windowSize_bins)] = matrixArray[0]
-    #showMatrix(plotMatrix)
+    #scale matrix, if requested
+    if scalematrix:
+        print("Scaling Hi-C matrix.")
+        print("Current extreme values: min. {:.3f}, max. {:.3f}".format(matrixArray.min(), matrixArray.max()))
+        matrixArray = utils.scaleArray(matrixArray)
+        print("New extreme values: min.{:.3f}, max. {:.3f}".format(matrixArray.min(), matrixArray.max()))
     
     #build the chromatin factor array (2D matrix with depth 1 = 3D)
     #for each of the matrices taken from the original Hi-C matrix
