@@ -62,13 +62,18 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
             print(msg_nan)
     return binArray
 
-def scale1Darray(pArray):
+def scaleArray(pArray):
     # min-max scaling (0...1) for 1D arrays 
-    if pArray is None or pArray.ndim != 1 or pArray.size == 0:
+    if pArray is None or pArray.size == 0:
         msg = "cannot normalize empty array"
         print(msg)
         return pArray
-    normArray = (pArray - pArray.min()) / (pArray.max() - pArray.min())
+    if pArray.max() - pArray.min() != 0:
+        normArray = (pArray - pArray.min()) / (pArray.max() - pArray.min())
+    elif pArray.max() > 0: #min = max >0
+        normArray = pArray / pArray.max()
+    else: #min=max <= 0
+        normArray = np.zeros_like(pArray)
     return normArray
 
 
@@ -170,7 +175,7 @@ def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pCh
     binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
     ##bin the single proteins
     for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
-        binnedChromatinFactorArray[i] = scale1Darray(binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr))
+        binnedChromatinFactorArray[i] = scaleArray(binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr))
     binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
     ##compose chromatin factor input for all possible matrices
     nr_matrices = int(binnedChromatinFactorArray.shape[1] - 3*pWindowSize_bins + 1)
