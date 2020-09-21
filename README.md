@@ -49,7 +49,7 @@ Options:
   - format depends on your data, e.g. "chr17" or "17"
 - --modelfilepath|-mfp: Filename for trained model
   - required
-  - default "./trainedModel.tf"
+  - default "trainedModel.h5"
 - --learningRate|-lr: Learning rate for stoch. grad. descent
   - required, numerical value > 1e-10, default 0.1
 - --numberEpochs|-ep: Number of epochs for network
@@ -97,6 +97,7 @@ Options:
 - --trainedmodel|-trm: trained model from "training" above
   - required
   - is created by running training.py
+  - must be in .h5 format
 - --chromosome|-chrom: Chromosome to predict
   - required
   - format depends on your data, e.g. "chr17" or "17"
@@ -118,7 +119,7 @@ Options:
 ./PredictionFactors/factor2.bigwig
 ./PredictionFactors/factor3.bigwig
 ```
-- The actual name of the factors "factor1.bigwig", "factor2.bigwig", "factor3.bigwig" in the example) does not matter, but it must be the same in the training folder and the prediction folder. Also see structure and filenames of example data provided in the repository.
+- The actual name of the factors "factor1.bigwig", "factor2.bigwig", "factor3.bigwig" in the example) does not matter, but it must be the same in the training folder and the prediction folder. Also see structure and filenames of example data provided in the repository under "train_test_data/".
 - Too large values for the learning rate will make the SGD algorithm diverge
 - Smaller values for the learning rate are recommended when not scaling the matrices because the absolute values of the loss can then become very 
 large, causing numerical problems. Try e.g. learning rates of 10e-4.
@@ -128,6 +129,7 @@ The following example will work with the data provided in the github repository 
 
 Training:
 ```
+mkdir logs #if not already existing
 python training.py -tm train_test_data/GM12878/GSE63525_GM12878_combined_30_25kb_chr17.cool -cp train_test_data/GM12878/-o ./logs/ -ep 3000
 ```
 

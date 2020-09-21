@@ -28,7 +28,7 @@ tf.random.set_seed(35)
               type=str, default="17", help="chromosome to train on")
 @click.option("--modelfilepath", "-mfp", required=True, 
               type=click.Path(writable=True,dir_okay=False), 
-              default="./trainedModel.tf", help="path+filename for trained model")
+              default="trainedModel.h5", help="path+filename for trained model")
 @click.option("--learningRate", "-lr", required=True,
                 type=click.FloatRange(min=1e-10), default=1e-1,
                 help="learning rate for stochastic gradient descent")
@@ -160,7 +160,7 @@ def training(trainmatrix,
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
     saveFreqInt = int(np.ceil(input_train.shape[0]/batchsize) * 20)
-    checkpointFilename = outputpath + "/checkpoint_{epoch:05d}.backup"
+    checkpointFilename = outputpath + "checkpoint_{epoch:05d}.h5"
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
                                                         save_freq=saveFreqInt)
@@ -182,7 +182,7 @@ def training(trainmatrix,
             )
 
     #store the trained network
-    tf.keras.models.save_model(model,filepath=modelfilepath)
+    model.save(filepath=modelfilepath,save_format="h5")
 
     #plot train- and validation loss over epochs
     lossPlotFilename = outputpath + "lossOverEpochs.png"
