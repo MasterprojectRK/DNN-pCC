@@ -1,6 +1,6 @@
 from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler,scaleArray
 import click
-import keras
+import tensorflow as tf
 import numpy as np
 
 
@@ -32,7 +32,7 @@ def prediction(validationmatrix,
     #load the trained model first, since it contains parameters
     #which must be matched by the remaining inputs
     try:
-        trainedModel = keras.models.load_model(trainedmodel)
+        trainedModel = tf.keras.models.load_model(trainedmodel)
     except Exception as e:
         print(e)
         msg = "Could not load trained model {:s}. Wrong file?"
