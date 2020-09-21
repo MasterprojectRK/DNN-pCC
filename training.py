@@ -30,7 +30,7 @@ tf.random.set_seed(35)
               type=click.Path(writable=True,dir_okay=False), 
               default="./trainedModel.tf", help="path+filename for trained model")
 @click.option("--learningRate", "-lr", required=True,
-                type=click.FloatRange(min=1e-10), default=1e-5,
+                type=click.FloatRange(min=1e-10), default=1e-1,
                 help="learning rate for stochastic gradient descent")
 @click.option("--numberEpochs", "-ep", required=True,
                 type=click.IntRange(min=20), default=1000,
@@ -56,16 +56,7 @@ def training(trainmatrix,
             windowsize,
             scalematrix):
 
-    #constants
-    chromLength_bins = 3 * windowsize
-    kernelWidth = 1
-    nr_neurons1 = 460
-    nr_neurons2 = 881
-    nr_neurons3 = 1690
-    nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
-       
-    #check inputs
-    ##load relevant part of Hi-C matrix
+    #load relevant part of Hi-C matrix
     sparseHiCMatrix, binSizeInt  = getMatrixFromCooler(trainmatrix,chromosome)
     if sparseHiCMatrix is None:
         msg = "Could not read HiC matrix {:s} for training, check inputs"
@@ -75,31 +66,33 @@ def training(trainmatrix,
     msg = msg.format(trainmatrix, binSizeInt)
     print(msg)
     print("matrix shape", sparseHiCMatrix.shape)
-    ##check chromatin files
+    
+    #check chromatin files
     bigwigFileList = getBigwigFileList(chromatinpath)
     if len(bigwigFileList) == 0:
         msg = "No bigwig files (*.bigwig, *.bigWig, *.bw) found in {:s}. Aborting."
         msg = msg.format(chromatinpath)
         raise SystemExit(msg)
-    msg = "found {:d} chromatin factors in {:s}"
+    msg = "Found {:d} chromatin factors in {:s}:"
     msg = msg.format(len(bigwigFileList),chromatinpath)
     print(msg)
     for factor in bigwigFileList:
-        print(factor)
+        print(" ", factor)
     
     #matrix distance normalization, divide values in each side diagonal by their average
     ##possible and even quite fast, but doesn't look reasonable
-    ##sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, windowsize)
+    #sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, windowsize)
     
     #get all possible windowSize x windowSize matrices out of the original one
     matrixArray = utils.buildMatrixArray(sparseHiCMatrix, windowsize)
+
     #scale matrix, if requested
     if scalematrix:
         print("Scaling Hi-C matrix.")
         print("Current extreme values: min. {:.3f}, max. {:.3f}".format(matrixArray.min(), matrixArray.max()))
         matrixArray = utils.scaleArray(matrixArray)
         print("New extreme values: min.{:.3f}, max. {:.3f}".format(matrixArray.min(), matrixArray.max()))
-    
+
     #build the chromatin factor array (2D matrix with depth 1 = 3D)
     #for each of the matrices taken from the original Hi-C matrix
     chromatinFactorArray = utils.composeChromatinFactors(bigwigFileList,
@@ -136,6 +129,14 @@ def training(trainmatrix,
     print("matrix NANs", np.any(np.isnan(matrixArray)))
     print("chromatin infs", np.any(np.isinf(chromatinFactorArray)))
     print("matrix infs", np.any(np.isinf(matrixArray)))
+
+    #neural network constants as per Farre et al.
+    chromLength_bins = 3 * windowsize
+    kernelWidth = 1
+    nr_neurons1 = 460
+    nr_neurons2 = 881
+    nr_neurons3 = 1690
+    nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
 
     #build neural network as described by Farre et al.
     model = Sequential()
@@ -194,10 +195,10 @@ def training(trainmatrix,
     pred = model.predict(x=input_test)
     predMatrix = np.zeros(shape=(windowsize,windowsize))
     predMatrix[np.triu_indices(windowsize)] = pred[0] 
-    showMatrix(predMatrix)
+    showMatrix(predMatrix *1000)
     targetMatrix = np.zeros(shape=(windowsize,windowsize))
     targetMatrix[np.triu_indices(windowsize)] = matrixArray[0]
-    showMatrix(targetMatrix)
+    showMatrix(targetMatrix *1000)
 
     pearson_r, pearson_p = pearsonr(matrixArray[0],pred[0])
     msg = "Pearson R = {:.3f}, Pearson p = {:.3f}"
