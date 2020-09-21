@@ -7,7 +7,7 @@ from tensorflow.keras.models import Sequential
 import numpy as np
 from scipy.stats import pearsonr
 
-from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scaleArray, showMatrix
+from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scaleArray
 from tqdm import tqdm
 
 from numpy.random import seed
@@ -185,7 +185,8 @@ def training(trainmatrix,
     tf.keras.models.save_model(model,filepath=modelfilepath)
 
     #plot train- and validation loss over epochs
-    utils.plotLoss(history)
+    lossPlotFilename = outputpath + "lossOverEpochs.png"
+    utils.plotLoss(history, lossPlotFilename)
 
     #self-prediction just for testing
     input_test = np.expand_dims(chromatinFactorArray[0,:,:,:],0)
@@ -195,10 +196,10 @@ def training(trainmatrix,
     pred = model.predict(x=input_test)
     predMatrix = np.zeros(shape=(windowsize,windowsize))
     predMatrix[np.triu_indices(windowsize)] = pred[0] 
-    showMatrix(predMatrix *1000)
+    utils.plotMatrix(predMatrix *1000, outputpath + "predMatrix.png", "pred. matrix")
     targetMatrix = np.zeros(shape=(windowsize,windowsize))
     targetMatrix[np.triu_indices(windowsize)] = matrixArray[0]
-    showMatrix(targetMatrix *1000)
+    utils.plotMatrix(targetMatrix *1000, outputpath + "targetMatrix.png", "target matrix" )
 
     pearson_r, pearson_p = pearsonr(matrixArray[0],pred[0])
     msg = "Pearson R = {:.3f}, Pearson p = {:.3f}"
