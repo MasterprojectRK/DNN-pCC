@@ -78,21 +78,30 @@ def scaleArray(pArray):
 
 
 def showMatrix(pMatrix):
-    #test function to plot matrices
+    #test function to show matrices
     #not for production use
     print(pMatrix.max())
     plotmatrix = pMatrix + 1
     plt.matshow(plotmatrix, cmap="Reds", norm=colors.LogNorm())
     plt.show()
 
-def plotLoss(pKerasHistoryObject):
-    plt.plot(pKerasHistoryObject.history['loss'])
-    plt.plot(pKerasHistoryObject.history['val_loss'])
-    plt.title('model loss')
-    plt.ylabel('loss')
-    plt.xlabel('epoch')
-    plt.legend(['train', 'val'], loc='upper left')
-    plt.show()
+def plotMatrix(pMatrix, pFilename, pTitle):
+    #test function to plot matrices
+    #not for production use
+    fig1, ax1 = plt.subplots()
+    ax1.matshow(pMatrix, cmap="Reds", norm=colors.LogNorm())
+    ax1.set_title(str(pTitle))
+    fig1.savefig(pFilename)
+
+def plotLoss(pKerasHistoryObject, pFilename):
+    fig1, ax1 = plt.subplots()
+    ax1.plot(pKerasHistoryObject.history['loss'])
+    ax1.plot(pKerasHistoryObject.history['val_loss'])
+    ax1.set_title('model loss')
+    ax1.set_ylabel('loss')
+    ax1.set_xlabel('epoch')
+    ax1.legend(['train', 'val'], loc='upper left')
+    fig1.savefig(pFilename)
 
 
 def rebuildMatrix(pArrayOfTriangles, pWindowSize):
