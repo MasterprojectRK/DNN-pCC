@@ -150,12 +150,29 @@ def training(trainmatrix,
                   loss=keras.losses.MeanSquaredError())
     model.summary()
     
+    #callbacks to check the progress etc.
+    tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
+    saveFreqInt = int(np.ceil(input_train.shape[0]/batchsize) * 20)
+    checkpointFilename = outputpath + "/checkpoint_{epoch:05d}.backup"
+    checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
+                                                        monitor="val_loss",
+                                                        save_freq=saveFreqInt)
+    earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
+                                                         min_delta=1e-3,
+                                                         patience=5,
+                                                         restore_best_weights=True)
+
     #train the neural network
     history = model.fit(input_train, 
               target_train, 
               epochs= numberepochs,
               batch_size=batchsize,
-              validation_data=(input_val,target_val))
+              validation_data=(input_val,target_val),
+              callbacks=[tensorboardCallback,
+                          checkpointCallback,
+                            #earlyStoppingCallback
+                           ]
+            )
 
     #store the trained network
     keras.models.save_model(model,filepath=modelfilepath)
