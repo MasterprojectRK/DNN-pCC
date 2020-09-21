@@ -1,9 +1,9 @@
 #!python3
 import utils
 import click
-import keras
-from keras.layers import Conv2D,Dense,Dropout,Flatten
-from keras.models import Sequential
+import tensorflow as tf
+from tensorflow.keras.layers import Conv2D,Dense,Dropout,Flatten
+from tensorflow.keras.models import Sequential 
 import numpy as np
 from scipy.stats import pearsonr
 
@@ -13,8 +13,7 @@ from tqdm import tqdm
 from numpy.random import seed
 seed(35)
 
-from tensorflow import set_random_seed
-set_random_seed(35)
+tf.random.set_seed(35)
 
 @click.option("--trainmatrix","-tm",required=True,
                     type=click.Path(exists=True,dir_okay=False,readable=True),
@@ -146,8 +145,8 @@ def training(trainmatrix,
     model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=keras.optimizers.SGD(learning_rate=learningrate), 
-                  loss=keras.losses.MeanSquaredError())
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
+                  loss=tf.keras.losses.MeanSquaredError())
     model.summary()
     
     #callbacks to check the progress etc.
@@ -175,7 +174,7 @@ def training(trainmatrix,
             )
 
     #store the trained network
-    keras.models.save_model(model,filepath=modelfilepath)
+    tf.keras.models.save_model(model,filepath=modelfilepath)
 
     #plot train- and validation loss over epochs
     utils.plotLoss(history)
