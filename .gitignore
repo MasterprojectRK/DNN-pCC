@@ -6,3 +6,5 @@
 *.png
 *.backup
 *.tf
+logs/*
+*.h5
