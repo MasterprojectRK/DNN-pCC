@@ -95,11 +95,13 @@ def training(trainmatrix,
 
     #build the chromatin factor array (2D matrix with depth 1 = 3D)
     #for each of the matrices taken from the original Hi-C matrix
+    boxplotFilename = outputpath + "chromatinFactorBoxplot.png"
     chromatinFactorArray = utils.composeChromatinFactors(bigwigFileList,
                                                            pChromLength_bins=sparseHiCMatrix.shape[0], 
                                                            pBinSizeInt=binSizeInt,
                                                            pChromosomeStr=chromosome,
-                                                           pWindowSize_bins=windowsize)
+                                                           pWindowSize_bins=windowsize,
+                                                           pPlotFilename=boxplotFilename)
     #sanity check, should have the same numbers of training and target data
     if chromatinFactorArray.shape[0] != matrixArray.shape[0]:
         msg = "number of chromatin factor matrices ({:d})"
