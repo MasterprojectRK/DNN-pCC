@@ -40,6 +40,8 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
     except Exception as e:
         print(e)
     if properFileType:
+        chrom = pChromStr
+        if not chrom.startswith("chr"):
         chrom = "chr" + pChromStr
         #compute signal values (stats) over resolution-sized bins
         chromsize = bigwigFile.chroms(chrom)
