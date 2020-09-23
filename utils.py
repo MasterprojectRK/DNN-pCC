@@ -42,7 +42,7 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
     if properFileType:
         chrom = pChromStr
         if not chrom.startswith("chr"):
-        chrom = "chr" + pChromStr
+            chrom = "chr" + pChromStr
         #compute signal values (stats) over resolution-sized bins
         chromsize = bigwigFile.chroms(chrom)
         chromStartList = list(range(0,chromsize,pBinSizeInt))
@@ -131,10 +131,11 @@ def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
     nr_matrices = int(pSparseMatrix.shape[0] - 3*pWindowSize_bins + 1)
     #nr_matrices = 100
     matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
+    sparseCsrMatrix = pSparseMatrix.tocsr()
     for i in tqdm(range(nr_matrices),desc="composing matrices"):
         j = i + pWindowSize_bins
         k = j + pWindowSize_bins
-        trainmatrix = pSparseMatrix.toarray()[j:k,j:k][np.triu_indices(pWindowSize_bins)]
+        trainmatrix = sparseCsrMatrix[j:k,j:k].todense()[np.triu_indices(pWindowSize_bins)]
         matrixArray[i] = trainmatrix
     return matrixArray
 
