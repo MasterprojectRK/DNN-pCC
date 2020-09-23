@@ -21,13 +21,21 @@ import numpy as np
 @click.option("--multiplier", "-mul", required=False,
                     type=click.FloatRange(min=1.0, max=50000), default=1.0,
                     help="Predicted matrices are scaled to value range 0...1.\n Use --multiplier mmm to get range 0...mmm e.g. for better visualization")
+@click.option("--clampFactors","-cfac", required=False,
+                type=bool, default=True,
+                help="Clamp outliers in chromatin factor data")
+@click.option("--scaleFactors","-scf", required=False,
+                type=bool, default=True,
+                help="Scale chromatin factor data to range 0...1 (recommended)")
 @click.command()
 def prediction(validationmatrix, 
                 chromatinpath, 
                 outputpath, 
                 trainedmodel,
                 chromosome,
-                multiplier):
+                multiplier,
+                clampfactors,
+                scalefactors):
     
     #load the trained model first, since it contains parameters
     #which must be matched by the remaining inputs
@@ -86,7 +94,9 @@ def prediction(validationmatrix,
                                                            pChromLength_bins=chromLength_bins, 
                                                            pBinSizeInt=binSizeInt,
                                                            pChromosomeStr=chromosome,
-                                                           pWindowSize_bins=windowsize)
+                                                           pWindowSize_bins=windowsize,
+                                                           pClampArray=clampfactors,
+                                                           pScaleArray=scalefactors)
 
       
     #feed the chromatin factors through the trained model
