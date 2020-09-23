@@ -44,6 +44,12 @@ tf.random.set_seed(35)
 @click.option("--scaleMatrix", "-scm", required=True,
                 type=bool, default=True,
                 help="Scale Hi-C matrix to [0...1]")
+@click.option("--clampFactors","-cfac", required=False,
+                type=bool, default=True,
+                help="Clamp outliers in chromatin factor data")
+@click.option("--scaleFactors","-scf", required=False,
+                type=bool, default=True,
+                help="Scale chromatin factor data to range 0...1 (recommended)")
 @click.command()
 def training(trainmatrix,
             chromatinpath,
@@ -54,7 +60,9 @@ def training(trainmatrix,
             numberepochs,
             batchsize,
             windowsize,
-            scalematrix):
+            scalematrix,
+            clampfactors,
+            scalefactors):
 
     #load relevant part of Hi-C matrix
     sparseHiCMatrix, binSizeInt  = getMatrixFromCooler(trainmatrix,chromosome)
@@ -101,7 +109,9 @@ def training(trainmatrix,
                                                            pBinSizeInt=binSizeInt,
                                                            pChromosomeStr=chromosome,
                                                            pWindowSize_bins=windowsize,
-                                                           pPlotFilename=boxplotFilename)
+                                                           pPlotFilename=boxplotFilename,
+                                                           pClampArray=clampfactors,
+                                                           pScaleArray=scalefactors)
     #sanity check, should have the same numbers of training and target data
     if chromatinFactorArray.shape[0] != matrixArray.shape[0]:
         msg = "number of chromatin factor matrices ({:d})"
