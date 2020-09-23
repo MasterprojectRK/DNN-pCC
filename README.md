@@ -68,7 +68,7 @@ Options:
 Outputs:
 - trained Model
   - stored to output file specified above
-  - in tensorflow format
+  - in .h5 container format
 - tensorboard data
   - stored to output folder specified above
   - use `tensorboard --logdir=$outputfolderFromAbove` to visualize the progress
@@ -105,6 +105,7 @@ Options:
 - --multiplier|-mul: Multiplier for scaling output matrix
   - required
   - default 1.0
+  - output matrices are scaled to range 0...1 by default and will be multiplied by given factor
 
 ## Notes:
 - Bigwig files which represent the same chromatin factor, e.g. CTCF, H3K9me3 and so on, must have the same filename in the training folder and the prediction folder. For three factors, for example, one might have the following structure:
