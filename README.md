@@ -103,8 +103,8 @@ Options:
   - format depends on your data, e.g. "chr17" or "17"
   - training and prediction chromosome need not be the same
 - --multiplier|-mul: Multiplier for scaling output matrix
- - required
- - default 1.0
+  - required
+  - default 1.0
 
 ## Notes:
 - Bigwig files which represent the same chromatin factor, e.g. CTCF, H3K9me3 and so on, must have the same filename in the training folder and the prediction folder. For three factors, for example, one might have the following structure:
@@ -135,5 +135,5 @@ python training.py -tm train_test_data/GM12878/GSE63525_GM12878_combined_30_25kb
 
 Prediction:
 ```
-python prediction.py -cp train_test_data/K562/ -o ./ -trm ./trainedModel.tf -vm train_test_data/K562/GSE63525_K562_combined_30_25kb_chr17.cool -mul 1000
+python prediction.py -cp train_test_data/K562/ -o ./ -trm ./trainedModel.h5 -vm train_test_data/K562/GSE63525_K562_combined_30_25kb_chr17.cool -mul 1000
 ```
