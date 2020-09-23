@@ -183,12 +183,20 @@ def distanceNormalize(pSparseCooMatrix, pWindowSize_bins):
     distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins))
     return distNormalizedMatrix
 
-def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pWindowSize_bins ):
+def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pWindowSize_bins, pPlotFilename=None, pClampArray=True, pScaleArray=True):
     binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
     ##bin the single proteins
     for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
-        binnedChromatinFactorArray[i] = scaleArray(binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr))
+        binnedFactor = binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr)
+        if pClampArray: #clamping outliers before scaling
+            binnedFactor = clampArray(binnedFactor)
+        if pScaleArray:
+            binnedFactor = scaleArray(binnedFactor)
+        binnedChromatinFactorArray[i] = binnedFactor
     binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
+    #print boxplots, if requested
+    if pPlotFilename is not None:
+        plotChromatinFactorStats(binnedChromatinFactorArray, pFilename=pPlotFilename)
     ##compose chromatin factor input for all possible matrices
     nr_matrices = int(binnedChromatinFactorArray.shape[1] - 3*pWindowSize_bins + 1)
     chromatinFactorArray = np.empty(shape=(nr_matrices,len(pBigwigFileList),3*pWindowSize_bins,1))
@@ -196,3 +204,29 @@ def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pCh
         endIndex = i + 3*pWindowSize_bins
         chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
     return chromatinFactorArray
+
+def plotChromatinFactorStats(pChromFactorArray, pFilename):
+    #store box plots of the chromatin factors in the array
+    fig1, ax1 = plt.subplots()
+    toPlotList = []
+    for i in range(pChromFactorArray.shape[0]):
+        toPlotList.append(pChromFactorArray[i].flatten())
+    ax1.boxplot(toPlotList)
+    ax1.set_title("Chromatin factor boxplots")
+    ax1.set_xlabel("Chromatin factor number")
+    ax1.set_ylabel("Chromatin factor signal value")
+    fig1.savefig(pFilename)
+
+def clampArray(pArray):
+    #clamp all values array to be within 
+    #lowerQuartile - 1.5xInterquartile ... upperQuartile + 1.5xInterquartile
+    clampedArray = pArray.copy()
+    upperQuartile = np.quantile(pArray,0.75)
+    lowerQuartile = np.quantile(pArray,0.25)
+    interQuartile = upperQuartile - lowerQuartile
+    if interQuartile > 1.0:
+        upperClampingBound = upperQuartile + 1.5*interQuartile
+        lowerClampingBound = lowerQuartile - 1.5*interQuartile
+        clampedArray[clampedArray < lowerClampingBound] = lowerClampingBound
+        clampedArray[clampedArray > upperClampingBound] = upperClampingBound
+    return clampedArray
