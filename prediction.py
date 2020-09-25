@@ -2,6 +2,8 @@ from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMa
 import click
 import tensorflow as tf
 import numpy as np
+import csv
+import ast
 
 
 @click.option("--validationmatrix","-vm", required=False,
@@ -21,12 +23,9 @@ import numpy as np
 @click.option("--multiplier", "-mul", required=False,
                     type=click.FloatRange(min=1.0, max=50000), default=1.0,
                     help="Predicted matrices are scaled to value range 0...1.\n Use --multiplier mmm to get range 0...mmm e.g. for better visualization")
-@click.option("--clampFactors","-cfac", required=False,
-                type=bool, default=True,
-                help="Clamp outliers in chromatin factor data")
-@click.option("--scaleFactors","-scf", required=False,
-                type=bool, default=True,
-                help="Scale chromatin factor data to range 0...1 (recommended)")
+@click.option("--trainParamFile", "-tpf", required=True,
+                type=click.Path(exists=True, dir_okay=False,readable=True),
+                help="train parameter file (csv format)")
 @click.command()
 def prediction(validationmatrix, 
                 chromatinpath, 
@@ -34,11 +33,10 @@ def prediction(validationmatrix,
                 trainedmodel,
                 chromosome,
                 multiplier,
-                clampfactors,
-                scalefactors):
+                trainparamfile):
     
-    #load the trained model first, since it contains parameters
-    #which must be matched by the remaining inputs
+    
+    #load the trained model
     try:
         trainedModel = tf.keras.models.load_model(trainedmodel)
     except Exception as e:
@@ -47,21 +45,45 @@ def prediction(validationmatrix,
         msg = msg.format(trainedmodel)
         raise SystemExit(msg)
 
-    #derive window size    
+    #load the param file and extract params;
+    #required to decide about bin size 
+    #and whether chromatin factors should be clamped and scaled
+    try:
+        with open(trainparamfile) as csvfile:
+            reader = csv.DictReader(csvfile)
+            trainParamDict =  reader.__next__()   #ignore anything but first line after header
+    except Exception as e:
+        msg = "Error: {:s}.\nCould not read train param file.".format(str(e))
+        raise SystemExit(msg)
+    try:
+        windowsize = int(trainParamDict["windowsize"])
+        binSizeInt = int(trainParamDict["binSize"])
+        clampfactors = bool(trainParamDict["clampfactors"])
+        scalefactors = bool(trainParamDict["scalefactors"])
+        trainmatshape = ast.literal_eval(trainParamDict["train_matrix_shape"])
+        #for now, only allow same chrom length as in training
+        chromLength_bins = int(trainmatshape[0])
+    except Exception as e:
+        msg = "Aborting. Parameter not in param file or wrong data type:\n{:s}"
+        msg = msg.format(str(e))
+        raise SystemExit(msg)
+
+    #check whether the window size of the model fits the train params   
     inputlength = trainedModel.layers[0].input_shape[2]
     if inputlength % 3 != 0:
         msg = "Error. Expected input length is {:d} and does not divide by 3"
         msg = msg.format(inputlength)
         raise SystemExit(msg)
-    windowsize = int(inputlength / 3)
+    modelWindowSize = int(inputlength / 3)
+    if modelWindowSize != windowsize:
+        msg = "Error. Windowsize in trainParam file does not match trained model\n."
+        msg += "Trained Model: {:d}, Param File {:d}"
+        msg = msg.format(modelWindowSize, windowsize)
+        raise SystemExit(msg)
     
-    #for testing, provide these numbers as constants
-    binSizeInt = 25000
-    chromLength_bins = 3248
-
-    #load chromatin files first, since it is faster than loading/composing
-    #the validation matrices and if there are too few or too much, 
-    #we can already stop here without computing the matrices.
+    #load chromatin files first
+    #if there are too few or too much, 
+    #we can already stop here.
     bigwigFileList = getBigwigFileList(chromatinpath)
     nr_chromatinFactors = trainedModel.layers[0].input_shape[1]
     if len(bigwigFileList) != nr_chromatinFactors:
@@ -102,7 +124,8 @@ def prediction(validationmatrix,
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(x=chromatinFactorArray)
     
-    #Scale to 0...1 and multiply with given multiplier for better visualization.
+    #Scale predicted matrix to 0...1 
+    #and multiply with given multiplier for better visualization.
     predMatrixArray = scaleArray(predMatrixArray) * multiplier
 
     #rebuild the cooler matrix from the predictions and write out
@@ -110,12 +133,16 @@ def prediction(validationmatrix,
     coolerMatrixName = outputpath + "predMatrix.cool"
     writeCooler(meanMatrix,binSizeInt,coolerMatrixName,chromosome)
 
+    #If target matrix provided, compute some figures 
+    #to assess prediction quality
     if validationmatrix is not None:
         matrixArray = buildMatrixArray(sparseHiCMatrix, windowsize)
         loss = trainedModel.evaluate(x=chromatinFactorArray, y=matrixArray)
         print("loss: {:.3f}".format(loss))
 
     #store results
+        #to be implemented
+
 
 if __name__ == "__main__":
     prediction() #pylint: disable=no-value-for-parameter

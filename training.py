@@ -6,6 +6,7 @@ from tensorflow.keras.layers import Conv2D,Dense,Dropout,Flatten
 from tensorflow.keras.models import Sequential 
 import numpy as np
 from scipy.stats import pearsonr
+import csv
 
 from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scaleArray
 from tqdm import tqdm
@@ -63,6 +64,8 @@ def training(trainmatrix,
             scalematrix,
             clampfactors,
             scalefactors):
+    #save the input parameters so they can be written to csv later
+    paramDict = locals().copy()
 
     #load relevant part of Hi-C matrix
     sparseHiCMatrix, binSizeInt  = getMatrixFromCooler(trainmatrix,chromosome)
@@ -74,6 +77,8 @@ def training(trainmatrix,
     msg = msg.format(trainmatrix, binSizeInt)
     print(msg)
     print("matrix shape", sparseHiCMatrix.shape)
+    paramDict["binSize"] = binSizeInt
+    paramDict["train_matrix_shape"] = sparseHiCMatrix.shape
     
     #check chromatin files
     bigwigFileList = getBigwigFileList(chromatinpath)
@@ -125,17 +130,15 @@ def training(trainmatrix,
     choice = np.random.choice(range(nr_matrices), size=(int(0.8*nr_matrices)), replace=False)
     indices = np.zeros(nr_matrices, dtype=bool)
     indices[choice] = True
-    print("first training index", min(choice))
-    
     input_train = chromatinFactorArray[indices,:,:,:].astype("float32")
     target_train = matrixArray[indices,:].astype("float32")
     input_val = chromatinFactorArray[~indices,:,:,:].astype("float32")
     target_val = matrixArray[~indices,:].astype("float32")
 
-    print(input_train.shape)
-    print(input_val.shape)
-    print(target_train.shape)
-    print(target_val.shape)
+    print("train input shape", input_train.shape)
+    print("val. input shape",input_val.shape)
+    print("train target shape",target_train.shape)
+    print("val. target shape",target_val.shape)
 
     print("chromatin NANs", np.any(np.isnan(chromatinFactorArray)))
     print("matrix NANs", np.any(np.isnan(matrixArray)))
@@ -176,11 +179,21 @@ def training(trainmatrix,
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
                                                         save_freq=saveFreqInt)
-    earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
-                                                         min_delta=1e-3,
-                                                         patience=5,
-                                                         restore_best_weights=True)
+    #earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
+    #                                                     min_delta=1e-3,
+    #                                                     patience=5,
+    #                                                     restore_best_weights=True)
 
+    #save the training parameters to a file before starting to train
+    #(allows recovering the parameters even if training is aborted
+    # and only intermediate models are available)
+    parameterFile = outputpath + "trainParams.csv"    
+    with open(parameterFile, "w") as csvfile:
+        dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(paramDict.keys())))
+        dictWriter.writeheader()
+        dictWriter.writerow(paramDict)
+
+    
     #train the neural network
     history = model.fit(input_train, 
               target_train, 
