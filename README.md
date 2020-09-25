@@ -33,35 +33,35 @@ python training.py [options]
 ```
 Options:
 - --help: print help and exit
-- --trainmatrix|-tm: Training Hi-C matrix
+- --trainmatrix | -tm: Training Hi-C matrix
   - required, must be in cooler format
   - the bin size (resolution) is determined from the matrix
-- --chromatinPath|-cp: Path to directory with chromatin factor data
+- --chromatinPath | -cp: Path to directory with chromatin factor data
   - required
   - chromatin factors must be in bigwig format
   - filenames in the folder are important, make sure to read the notes below
-- --outputPath|-o: Output path for logfiles etc.
+- --outputPath | -o: Output path for logfiles etc.
   - required 
   - data for tensorboard will be stored here
   - trained models will be stored here every 20 epochs
-- --chromosome|-chrom: The chromosome used for training
+- --chromosome | -chrom: The chromosome used for training
   - required
   - format depends on your data, e.g. "chr17" or "17"
-- --modelfilepath|-mfp: Filename for trained model
+- --modelfilepath | -mfp: Filename for trained model
   - required
   - default "trainedModel.h5"
-- --learningRate|-lr: Learning rate for stoch. grad. descent
+- --learningRate | -lr: Learning rate for stoch. grad. descent
   - required, numerical value > 1e-10, default 0.1
-- --numberEpochs|-ep: Number of epochs for network
+- --numberEpochs | -ep: Number of epochs for network
   - required, numerical value > 20
   - default 1000
-- --batchsize|-bs: Batch size for network
+- --batchsize | -bs: Batch size for network
   - required, numerical value > 5
   - default 30
-- --windowsize|-ws: Chromatin window to consider for training
+- --windowsize | -ws: Chromatin window to consider for training
   - required, numerical value > 10
   - default 80
-- --scaleMatrix|-scm: Scale matrix to 0...1
+- --scaleMatrix | -scm: Scale matrix to 0...1
   - required
   - default True
 
@@ -84,28 +84,29 @@ Usage:
 python prediction.py [options]
 ```
 Options:
-- --validationmatrix|-vm: Validation Hi-C matrix
+- --validationmatrix | -vm: Validation Hi-C matrix
   - optional
   - must be in cooler format, if provided
   - will allow to compute a few stats on prediction quality
-- --chromatinPath|-cp: Path to directory with chromatin factor data
+- --chromatinPath | -cp: Path to directory with chromatin factor data
   - required
   - chromatin factors must be in bigwig format
   - filenames in the folder are important, make sure to read the notes below
 - --outputPath|-o: Path where the results will be stored
   - required
-- --trainedmodel|-trm: trained model from "training" above
+- --trainedmodel | -trm: trained model from "training" above
   - required
   - is created by running training.py
   - must be in .h5 format
-- --chromosome|-chrom: Chromosome to predict
+- --chromosome | -chrom: Chromosome to predict
   - required
   - format depends on your data, e.g. "chr17" or "17"
   - training and prediction chromosome need not be the same
-- --multiplier|-mul: Multiplier for scaling output matrix
+- --multiplier | -mul: Multiplier for scaling output matrix
   - required
   - default 1.0
   - output matrices are scaled to range 0...1 by default and will be multiplied by given factor
+  - --trainParamFile | -tpf: csv file with training parameters as created by training.py  ($outputfolder/trainParams.csv)
 
 ## Notes:
 - Bigwig files which represent the same chromatin factor, e.g. CTCF, H3K9me3 and so on, must have the same filename in the training folder and the prediction folder. For three factors, for example, one might have the following structure:
@@ -120,7 +121,7 @@ Options:
 ./PredictionFactors/factor2.bigwig
 ./PredictionFactors/factor3.bigwig
 ```
-- The actual name of the factors "factor1.bigwig", "factor2.bigwig", "factor3.bigwig" in the example) does not matter, but it must be the same in the training folder and the prediction folder. Also see structure and filenames of example data provided in the repository under "train_test_data/".
+- The actual name of the factors ("factor1.bigwig", "factor2.bigwig", "factor3.bigwig" in the example) does not matter, but it must be the same in the training folder and the prediction folder. Also see structure and filenames of example data provided in the repository under "train_test_data/".
 - Too large values for the learning rate will make the SGD algorithm diverge
 - Smaller values for the learning rate are recommended when not scaling the matrices because the absolute values of the loss can then become very 
 large, causing numerical problems. Try e.g. learning rates of 10e-4.
