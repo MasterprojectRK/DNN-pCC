@@ -43,7 +43,7 @@ tf.random.set_seed(35)
                 type=click.IntRange(min=10), default=80,
                 help="Window size (in bins) for composing training data")
 @click.option("--scaleMatrix", "-scm", required=True,
-                type=bool, default=True,
+                type=bool, default=False,
                 help="Scale Hi-C matrix to [0...1]")
 @click.option("--clampFactors","-cfac", required=False,
                 type=bool, default=True,
