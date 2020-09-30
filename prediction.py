@@ -1,4 +1,4 @@
-from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler,scaleArray
+from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler,scaleArray,multiInputGenerator
 import click
 import tensorflow as tf
 import numpy as np
@@ -58,6 +58,7 @@ def prediction(validationmatrix,
     try:
         windowsize = int(trainParamDict["windowsize"])
         binSizeInt = int(trainParamDict["binSize"])
+        batchSizeInt = int(trainParamDict["batchsize"])
         clampfactors = bool(trainParamDict["clampfactors"])
         scalefactors = bool(trainParamDict["scalefactors"])
         trainmatshape = ast.literal_eval(trainParamDict["train_matrix_shape"])
@@ -116,13 +117,14 @@ def prediction(validationmatrix,
                                                            pChromLength_bins=chromLength_bins, 
                                                            pBinSizeInt=binSizeInt,
                                                            pChromosomeStr=chromosome,
-                                                           pWindowSize_bins=windowsize,
                                                            pClampArray=clampfactors,
                                                            pScaleArray=scalefactors)
 
-      
+    predIndices = np.arange(chromatinFactorArray.shape[1] - 3*windowsize + 1)
+    predictionDataGenerator = multiInputGenerator(None,chromatinFactorArray,predIndices,batchSizeInt,windowsize,shuffle=False)  
+
     #feed the chromatin factors through the trained model
-    predMatrixArray = trainedModel.predict(x=chromatinFactorArray)
+    predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
     
     #Scale predicted matrix to 0...1 
     #and multiply with given multiplier for better visualization.
@@ -136,8 +138,8 @@ def prediction(validationmatrix,
     #If target matrix provided, compute some figures 
     #to assess prediction quality
     if validationmatrix is not None:
-        matrixArray = buildMatrixArray(sparseHiCMatrix, windowsize)
-        loss = trainedModel.evaluate(x=chromatinFactorArray, y=matrixArray)
+        evalGenerator = multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,predIndices,batchSizeInt,windowsize,shuffle=False)
+        loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
 
     #store results

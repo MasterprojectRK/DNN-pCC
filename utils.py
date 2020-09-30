@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from tqdm import tqdm
 from scipy import sparse
+from Bio import SeqIO
+from sklearn.preprocessing import MultiLabelBinarizer
+import tensorflow.keras
 
 def getBigwigFileList(pDirectory):
     #returns a list of bigwig files in pDirectory
@@ -28,6 +31,7 @@ def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
         binSizeInt = coolerMatrix.binsize
     except Exception as e:
         print(e)
+    sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
     return sparseMatrix, binSizeInt
 
 def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
@@ -131,11 +135,10 @@ def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
     nr_matrices = int(pSparseMatrix.shape[0] - 3*pWindowSize_bins + 1)
     #nr_matrices = 100
     matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
-    sparseCsrMatrix = pSparseMatrix.tocsr()
     for i in tqdm(range(nr_matrices),desc="composing matrices"):
         j = i + pWindowSize_bins
         k = j + pWindowSize_bins
-        trainmatrix = sparseCsrMatrix[j:k,j:k].todense()[np.triu_indices(pWindowSize_bins)]
+        trainmatrix = pSparseMatrix[j:k,j:k].todense()[np.triu_indices(pWindowSize_bins)]
         matrixArray[i] = trainmatrix
     return matrixArray
 
@@ -173,17 +176,17 @@ def writeCooler(pMatrix, pBinSizeInt, pOutfile, pChromosome, pChromSize=None,  p
     #write out the cooler
     cooler.create_cooler(pOutfile, bins=bins, pixels=pixels, dtypes={'count': np.float64}, metadata=pMetadata)
 
-def distanceNormalize(pSparseCooMatrix, pWindowSize_bins):
+def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     #compute the means along the diagonals (= same distance)
     #and divide all values on the diagonals by their respective mean
     diagList = []
     for i in range(pWindowSize_bins):
-        diagArr = sparse.coo_matrix.diagonal(pSparseCooMatrix,i)
+        diagArr = sparse.csr_matrix.diagonal(pSparseCsrMatrix,i)
         diagList.append(diagArr/diagArr.mean())
-    distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins))
+    distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
     return distNormalizedMatrix
 
-def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pWindowSize_bins, pPlotFilename=None, pClampArray=True, pScaleArray=True):
+def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pPlotFilename=None, pClampArray=True, pScaleArray=True):
     binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
     ##bin the single proteins
     for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
@@ -193,17 +196,10 @@ def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pCh
         if pScaleArray:
             binnedFactor = scaleArray(binnedFactor)
         binnedChromatinFactorArray[i] = binnedFactor
-    binnedChromatinFactorArray = np.expand_dims(binnedChromatinFactorArray, 2)
     #print boxplots, if requested
     if pPlotFilename is not None:
         plotChromatinFactorStats(binnedChromatinFactorArray, pFilename=pPlotFilename)
-    ##compose chromatin factor input for all possible matrices
-    nr_matrices = int(binnedChromatinFactorArray.shape[1] - 3*pWindowSize_bins + 1)
-    chromatinFactorArray = np.empty(shape=(nr_matrices,len(pBigwigFileList),3*pWindowSize_bins,1))
-    for i in tqdm(range(nr_matrices),desc="composing chromatin factors"):
-        endIndex = i + 3*pWindowSize_bins
-        chromatinFactorArray[i] = binnedChromatinFactorArray[:,i:endIndex,:]
-    return chromatinFactorArray
+    return binnedChromatinFactorArray
 
 def plotChromatinFactorStats(pChromFactorArray, pFilename):
     #store box plots of the chromatin factors in the array
@@ -230,3 +226,104 @@ def clampArray(pArray):
         clampedArray[clampedArray < lowerClampingBound] = lowerClampingBound
         clampedArray[clampedArray > upperClampingBound] = upperClampingBound
     return clampedArray
+
+
+def readSequences(pDNAFastaFileStr):
+    sequenceStr = ""
+    try:
+        with open(pDNAFastaFileStr) as handle:
+            for record in SeqIO.parse(handle, "fasta"):
+                sequenceStr += str(record.seq.upper())
+    except Exception as e:
+        msg = "Could not read fasta file {:s}\n"
+        msg += str(e)
+        msg = msg.format(pDNAFastaFileStr)
+        print(msg)
+    if len(sequenceStr) > 0:
+        msg = "Successfully read sequence of total length {:d}\n"
+        msg += "from file {:s}."
+        msg = msg.format(len(sequenceStr), pDNAFastaFileStr)
+        print(msg)
+    return sequenceStr
+
+def encodeSequence(pSequenceStr):
+    if pSequenceStr is None or pSequenceStr == "":
+        msg = "Aborting. DNA sequence is empty"
+        raise SystemExit(msg)
+    mlb = MultiLabelBinarizer()
+    encodedSequenceArray = mlb.fit_transform(pSequenceStr).astype("uint8")
+    if encodedSequenceArray.shape[1] != 4:
+        msg = "Warning: DNA sequence contains more than the 4 nucleotide symbols A,C,G,T\n"
+        msg += "Check your input sequence, if this is not intended."
+        print(msg)
+        print("Contained symbols:", ", ".join(mlb.classes_))
+    return encodedSequenceArray
+
+def fillEncodedSequence(pEncodedSequenceArray, pBinSizeInt):
+    actualLengthInt = pEncodedSequenceArray.shape[0] #here, length in basepairs
+    targetLengthInt = int(np.ceil(actualLengthInt/pBinSizeInt))*pBinSizeInt #in basepairs
+    returnArray = None
+    if targetLengthInt > actualLengthInt:
+        #append zero vectors to the array to fill the last bin
+        #in case the chromosome length is not divisible by bin size (as is normal)
+        toAppendArray = np.zeros((targetLengthInt-actualLengthInt,pEncodedSequenceArray.shape[1]),dtype="uint8")
+        returnArray = np.append(pEncodedSequenceArray,toAppendArray,axis=0)
+    else:
+        msg = "Warning: could not append zeros to end of array.\n"
+        msg += "Target length {:d}, actual length {:d}\n"
+        msg += "Array left unchanged."
+        msg = msg.format(targetLengthInt, actualLengthInt)
+        print(msg)
+        returnArray = pEncodedSequenceArray
+    return returnArray
+
+def buildSequenceArray(pDNAFastaFileStr, pBinSizeInt):
+    sequenceStr = readSequences(pDNAFastaFileStr)
+    sequenceArr = encodeSequence(sequenceStr)
+    sequenceArr = fillEncodedSequence(sequenceArr,pBinSizeInt)
+    return sequenceArr
+
+
+##the following class is an adapted version from a tutorial at Stanford University
+##https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
+
+class multiInputGenerator(tensorflow.keras.utils.Sequence):
+    def __init__(self, sparseMatrix, chromatinFactorArray, indices, batchsize, windowsize, shuffle=True):
+        self.sparseMatrix = sparseMatrix
+        self.chromatinFactorArray = chromatinFactorArray
+        self.indices = indices
+        self.batchsize = batchsize
+        self.windowsize = windowsize
+        self.shuffle = shuffle
+        if self.sparseMatrix is None:
+            self.shuffle = False
+        self.on_epoch_end()
+
+    def __len__(self):
+        return int(np.floor(len(self.indices)  / self.batchsize))
+
+    def __getitem__(self, index):
+        indices = self.indices[index*self.batchsize : (index+1)*self.batchsize]
+        return self.__generateData(indices)
+
+    def __generateData(self, indices):
+        factorArray = np.empty((self.batchsize, self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
+        matrixArray = np.empty((self.batchsize, int(self.windowsize*(self.windowsize + 1)/2)))
+        for b,i in enumerate(indices):
+            if self.sparseMatrix is not None:
+                #first matrix has a windowsize offset from start of chromosome (boundary handling)
+                j = i + self.windowsize
+                k = j + self.windowsize
+                trainmatrix = self.sparseMatrix[j:k,j:k].todense()[np.triu_indices(self.windowsize)]
+                matrixArray[b] = np.nan_to_num(trainmatrix)
+            #the chromatin factors have no offset
+            factorMat = self.chromatinFactorArray[:,i:i+3*self.windowsize]
+            factorArray[b] = np.expand_dims(factorMat,2)
+        if self.sparseMatrix is not None:
+            return factorArray, matrixArray
+        else:
+            return factorArray
+
+    def on_epoch_end(self):
+        if self.shuffle == True:
+            np.random.shuffle(self.indices) #in-place permutation
