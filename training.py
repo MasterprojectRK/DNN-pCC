@@ -2,8 +2,8 @@
 import utils
 import click
 import tensorflow as tf
-from tensorflow.keras.layers import Conv2D,Dense,Dropout,Flatten
-from tensorflow.keras.models import Sequential 
+from tensorflow.keras.layers import Conv2D,Dense,Dropout,Flatten,Concatenate
+from tensorflow.keras.models import Model, Sequential 
 import numpy as np
 from scipy.stats import pearsonr
 import csv
@@ -22,6 +22,9 @@ tf.random.set_seed(35)
 @click.option("--chromatinPath","-cp", required=True,
                     type=click.Path(exists=True,readable=True,file_okay=False),
                     help="Path where chromatin factor data in bigwig format resides")
+@click.option("--sequenceFile", "-sf", required=True,
+                    type=click.Path(exists=True,readable=True,dir_okay=False),
+                    help="Path to DNA sequence in fasta format")
 @click.option("--outputPath", "-o", required=True,
                     type=click.Path(exists=True,file_okay=False,writable=True),
                     help="Output path where trained network will be stored")
@@ -54,6 +57,7 @@ tf.random.set_seed(35)
 @click.command()
 def training(trainmatrix,
             chromatinpath,
+            sequencefile,
             outputpath,
             chromosome,
             modelfilepath,
@@ -103,6 +107,7 @@ def training(trainmatrix,
     for factor in bigwigFileList:
         print(" ", factor)
     
+    #bin the chromatin factors and create a numpy array from them
     plotFilename = outputpath + "chromFactorBoxplots.png"
     chromatinFactorArray = utils.composeChromatinFactors(pBigwigFileList = bigwigFileList,
                                                          pChromLength_bins = sparseHiCMatrix.shape[0],
@@ -112,6 +117,9 @@ def training(trainmatrix,
                                                          pClampArray=clampfactors,
                                                          pScaleArray=scalefactors)
 
+    #read the DNA sequence and do a one-hot encoding
+    encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
+    
     nr_Factors = chromatinFactorArray.shape[0]
     nr_matrices = sparseHiCMatrix.shape[0] - 3* windowsize + 1
     
@@ -120,15 +128,17 @@ def training(trainmatrix,
     validationIndices = np.setdiff1d(range(nr_matrices),trainIndices)
 
     #generators for training and validation data
-    trainDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,trainIndices,batchsize,windowsize)
-    validationDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,validationIndices,batchsize,windowsize)
+    trainDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray, encodedSequenceArray, trainIndices,batchsize,windowsize,binSizeInt)
+    validationDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,encodedSequenceArray, validationIndices,batchsize,windowsize,binSizeInt)
 
     #neural network constants as per Farre et al.
     chromLength_bins = 3 * windowsize
     kernelWidth = 1
-    nr_neurons1 = 460
-    nr_neurons2 = 881
-    nr_neurons3 = 1690
+    #nr_neurons1 = 460
+    #nr_neurons2 = 881
+    nr_neurons1 = 100
+    nr_neurons2 = 200
+    #nr_neurons3 = 1690
     nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
 
     #build neural network as described by Farre et al.
@@ -143,13 +153,49 @@ def training(trainmatrix,
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
-                  loss=tf.keras.losses.MeanSquaredError())
-    model.summary()
+    #model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
+    #model.add(Dropout(0.1))
+    #model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
+    #model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
+    #             loss=tf.keras.losses.MeanSquaredError())
+    #model.summary()
     
+    model2 = Sequential()
+    model2.add(Conv2D(filters=1, 
+                     kernel_size=(6,5), 
+                     padding="valid",
+                     activation="sigmoid",
+                     data_format="channels_last",
+                     input_shape=(6000000,5,1)))
+    model2.add(Conv2D(filters=1,
+                      kernel_size=(300,1),
+                      activation="sigmoid",
+                      data_format="channels_last"))
+    model2.add(Conv2D(filters=1,kernel_size=(5000,1),
+                      activation="sigmoid",
+                      data_format="channels_last"))
+    model2.add(Conv2D(filters=1,kernel_size=(25000,1),
+                      activation="sigmoid",
+                      data_format="channels_last"))
+    model2.add(Conv2D(filters=1,kernel_size=(100000,1),
+                      activation="sigmoid",
+                      data_format="channels_last"))
+    model2.add(Conv2D(filters=1,kernel_size=(1000000,1),
+                      activation="sigmoid",
+                      data_format="channels_last"))                              
+    model2.add(Flatten())
+    model2.add(Dense(20, activation="relu",kernel_regularizer="l2"))
+    model2.add(Dropout(0.1))
+
+    combined = Concatenate()([model.output,model2.output])
+    x = Dense(nr_neurons4,activation="relu",kernel_regularizer="l2")(combined)
+ 
+    finalModel = Model(inputs=[model.input, model2.input], outputs=x)
+    finalModel.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
+                 loss=tf.keras.losses.MeanSquaredError())
+    finalModel.summary()
+
+
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
     saveFreqInt = int(np.floor(len(trainIndices)/batchsize) * 20)
@@ -171,9 +217,11 @@ def training(trainmatrix,
         dictWriter.writeheader()
         dictWriter.writerow(paramDict)
 
+    #plot the model
+    tf.keras.utils.plot_model(finalModel,show_shapes=True, to_file=outputpath + "model.png")
     
     #train the neural network
-    history = model.fit(trainDataGenerator,
+    history = finalModel.fit(trainDataGenerator,
               epochs= numberepochs,
               validation_data= validationDataGenerator,
               callbacks=[tensorboardCallback,

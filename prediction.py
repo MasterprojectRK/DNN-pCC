@@ -1,4 +1,4 @@
-from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler,scaleArray,multiInputGenerator
+import utils
 import click
 import tensorflow as tf
 import numpy as np
@@ -12,6 +12,9 @@ import ast
 @click.option("--chromatinPath","-cp", required=True,
                     type=click.Path(exists=True,readable=True,file_okay=False),
                     help="Path where chromatin factor data in bigwig format resides")
+@click.option("--sequenceFile", "-sf", required=True,
+                    type=click.Path(exists=True,readable=True,dir_okay=False),
+                    help="Path to DNA sequence in fasta format")
 @click.option("--outputPath", "-o", required=True,
                     type=click.Path(exists=True,file_okay=False,writable=True),
                     help="Output path where results will be stored")
@@ -29,12 +32,12 @@ import ast
 @click.command()
 def prediction(validationmatrix, 
                 chromatinpath, 
+                sequencefile,
                 outputpath, 
                 trainedmodel,
                 chromosome,
                 multiplier,
                 trainparamfile):
-    
     
     #load the trained model
     try:
@@ -85,7 +88,7 @@ def prediction(validationmatrix,
     #load chromatin files first
     #if there are too few or too much, 
     #we can already stop here.
-    bigwigFileList = getBigwigFileList(chromatinpath)
+    bigwigFileList = utils.getBigwigFileList(chromatinpath)
     nr_chromatinFactors = trainedModel.layers[0].input_shape[1]
     if len(bigwigFileList) != nr_chromatinFactors:
         msg = "Aborting.\n"
@@ -99,21 +102,27 @@ def prediction(validationmatrix,
     for factor in bigwigFileList:
         print(factor)
 
+    #read the DNA sequence and do a one-hot encoding
+    encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
+
     #now load relevant part of Hi-C matrix, if provided,
     #since the bin size will be taken from there
     if validationmatrix is not None:
-        sparseHiCMatrix, binSizeInt  = getMatrixFromCooler(validationmatrix,chromosome)
+        sparseHiCMatrix, binSizeInt2  = utils.getMatrixFromCooler(validationmatrix,chromosome)
         if sparseHiCMatrix is None:
             msg = "Could not read HiC matrix {:s} for training, check inputs"
             msg = msg.format(validationmatrix)
             raise SystemExit(msg)
         msg = "Cooler matrix {:s} loaded.\nBin size (resolution) is {:d}bp."
-        msg = msg.format(validationmatrix, binSizeInt)
+        msg = msg.format(validationmatrix, binSizeInt2)
         print(msg)
         print("matrix shape", sparseHiCMatrix.shape)
-
+        if binSizeInt != binSizeInt2:
+            msg = "Warning. Bin size in training file and parameter file do not match"
+            print(msg)
+    
     #compose chromatin factors
-    chromatinFactorArray = composeChromatinFactors(bigwigFileList,
+    chromatinFactorArray = utils.composeChromatinFactors(bigwigFileList,
                                                            pChromLength_bins=chromLength_bins, 
                                                            pBinSizeInt=binSizeInt,
                                                            pChromosomeStr=chromosome,
@@ -121,24 +130,24 @@ def prediction(validationmatrix,
                                                            pScaleArray=scalefactors)
 
     predIndices = np.arange(chromatinFactorArray.shape[1] - 3*windowsize + 1)
-    predictionDataGenerator = multiInputGenerator(None,chromatinFactorArray,predIndices,batchSizeInt,windowsize,shuffle=False)  
+    predictionDataGenerator = utils.multiInputGenerator(None,chromatinFactorArray,encodedSequenceArray, predIndices,batchSizeInt,windowsize, binSizeInt, shuffle=False)  
 
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
     
     #Scale predicted matrix to 0...1 
     #and multiply with given multiplier for better visualization.
-    predMatrixArray = scaleArray(predMatrixArray) * multiplier
+    predMatrixArray = utils.scaleArray(predMatrixArray) * multiplier
 
     #rebuild the cooler matrix from the predictions and write out
-    meanMatrix = rebuildMatrix(predMatrixArray,windowsize)
+    meanMatrix = utils.rebuildMatrix(predMatrixArray,windowsize)
     coolerMatrixName = outputpath + "predMatrix.cool"
-    writeCooler(meanMatrix,binSizeInt,coolerMatrixName,chromosome)
+    utils.writeCooler(meanMatrix,binSizeInt,coolerMatrixName,chromosome)
 
     #If target matrix provided, compute some figures 
     #to assess prediction quality
     if validationmatrix is not None:
-        evalGenerator = multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,predIndices,batchSizeInt,windowsize,shuffle=False)
+        evalGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,encodedSequenceArray,predIndices,batchSizeInt,windowsize,binSizeInt,shuffle=False)
         loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
 
