@@ -166,23 +166,24 @@ def training(trainmatrix,
                      padding="valid",
                      activation="sigmoid",
                      data_format="channels_last",
-                     input_shape=(6000000,5,1)))
+                     input_shape=(3*windowsize*binSizeInt,5,1)))
     model2.add(Conv2D(filters=1,
                       kernel_size=(300,1),
                       activation="sigmoid",
-                      data_format="channels_last"))
+                      data_format="channels_last",
+                      strides=(3,1)))
+    model2.add(Conv2D(filters=1,kernel_size=(1000,1),
+                      activation="sigmoid",
+                      data_format="channels_last",
+                      strides=(10,1)))
     model2.add(Conv2D(filters=1,kernel_size=(5000,1),
                       activation="sigmoid",
-                      data_format="channels_last"))
-    model2.add(Conv2D(filters=1,kernel_size=(25000,1),
+                      data_format="channels_last",
+                      strides=(5,1)))
+    model2.add(Conv2D(filters=1,kernel_size=(10000,1),
                       activation="sigmoid",
-                      data_format="channels_last"))
-    model2.add(Conv2D(filters=1,kernel_size=(100000,1),
-                      activation="sigmoid",
-                      data_format="channels_last"))
-    model2.add(Conv2D(filters=1,kernel_size=(1000000,1),
-                      activation="sigmoid",
-                      data_format="channels_last"))                              
+                      data_format="channels_last",
+                      strides=(10,1)))                              
     model2.add(Flatten())
     model2.add(Dense(20, activation="relu",kernel_regularizer="l2"))
     model2.add(Dropout(0.1))
