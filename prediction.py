@@ -1,4 +1,5 @@
 from utils import showMatrix,getMatrixFromCooler,composeChromatinFactors,buildMatrixArray,getBigwigFileList,rebuildMatrix,writeCooler,scaleArray,multiInputGenerator
+from utils import rebuildMatrixFromVector, buildVectorArray
 import click
 import tensorflow as tf
 import numpy as np
@@ -111,6 +112,7 @@ def prediction(validationmatrix,
         msg = msg.format(validationmatrix, binSizeInt)
         print(msg)
         print("matrix shape", sparseHiCMatrix.shape)
+        vectorArray = buildVectorArray(sparseHiCMatrix,windowsize)
 
     #compose chromatin factors
     chromatinFactorArray = composeChromatinFactors(bigwigFileList,
@@ -131,14 +133,14 @@ def prediction(validationmatrix,
     predMatrixArray = scaleArray(predMatrixArray) * multiplier
 
     #rebuild the cooler matrix from the predictions and write out
-    meanMatrix = rebuildMatrix(predMatrixArray,windowsize)
+    meanMatrix = rebuildMatrixFromVector(predMatrixArray)
     coolerMatrixName = outputpath + "predMatrix.cool"
     writeCooler(meanMatrix,binSizeInt,coolerMatrixName,chromosome)
 
     #If target matrix provided, compute some figures 
     #to assess prediction quality
     if validationmatrix is not None:
-        evalGenerator = multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,predIndices,batchSizeInt,windowsize,shuffle=False)
+        evalGenerator = multiInputGenerator(vectorArray,chromatinFactorArray,predIndices,batchSizeInt,windowsize,shuffle=False)
         loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
 

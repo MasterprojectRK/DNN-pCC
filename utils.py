@@ -347,14 +347,14 @@ def buildSequenceArray(pDNAFastaFileStr, pBinSizeInt):
 ##https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, sparseMatrix, chromatinFactorArray, indices, batchsize, windowsize, shuffle=True):
-        self.sparseMatrix = sparseMatrix
+    def __init__(self, vectorArray, chromatinFactorArray, indices, batchsize, windowsize, shuffle=True):
+        self.vectorArray = vectorArray
         self.chromatinFactorArray = chromatinFactorArray
         self.indices = indices
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
-        if self.sparseMatrix is None:
+        if self.vectorArray is None:
             self.shuffle = False
         self.on_epoch_end()
 
@@ -367,19 +367,15 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
 
     def __generateData(self, indices):
         factorArray = np.empty((self.batchsize, self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
-        matrixArray = np.empty((self.batchsize, int(self.windowsize*(self.windowsize + 1)/2)))
+        vectorArray = np.empty((self.batchsize, self.windowsize))
         for b,i in enumerate(indices):
-            if self.sparseMatrix is not None:
-                #first matrix has a windowsize offset from start of chromosome (boundary handling)
-                j = i + self.windowsize
-                k = j + self.windowsize
-                trainmatrix = self.sparseMatrix[j:k,j:k].todense()[np.triu_indices(self.windowsize)]
-                matrixArray[b] = np.nan_to_num(trainmatrix)
+            if self.vectorArray is not None:
+                vectorArray[b] = np.nan_to_num(self.vectorArray[i])
             #the chromatin factors have no offset
             factorMat = self.chromatinFactorArray[:,i:i+3*self.windowsize]
             factorArray[b] = np.expand_dims(factorMat,2)
-        if self.sparseMatrix is not None:
-            return factorArray, matrixArray
+        if self.vectorArray is not None:
+            return factorArray, vectorArray
         else:
             return factorArray
 

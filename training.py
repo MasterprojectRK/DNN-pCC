@@ -91,6 +91,9 @@ def training(trainmatrix,
         sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)
         print("New extreme values: min.{:.3f}, max. {:.3f}".format(sparseHiCMatrix.min(), sparseHiCMatrix.max()))
 
+    vectorArray = utils.buildVectorArray(sparseHiCMatrix,windowsize)
+
+
     #check chromatin files
     bigwigFileList = getBigwigFileList(chromatinpath)
     if len(bigwigFileList) == 0:
@@ -113,23 +116,27 @@ def training(trainmatrix,
                                                          pScaleArray=scalefactors)
 
     nr_Factors = chromatinFactorArray.shape[0]
-    nr_matrices = sparseHiCMatrix.shape[0] - 3* windowsize + 1
+    nr_matrices = vectorArray.shape[0]
     
     #compute indices for train / validation split 
     trainIndices = np.random.choice(range(nr_matrices), size=(int(0.8*nr_matrices)), replace=False)
     validationIndices = np.setdiff1d(range(nr_matrices),trainIndices)
 
-    #generators for training and validation data
-    trainDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,trainIndices,batchsize,windowsize)
-    validationDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,validationIndices,batchsize,windowsize)
+    print("vec.arr", vectorArray.shape[0])
+    print("chrom.arr.", chromatinFactorArray.shape[1])
 
-    #neural network constants as per Farre et al.
+    #generators for training and validation data
+    trainDataGenerator = utils.multiInputGenerator(vectorArray,chromatinFactorArray,trainIndices,batchsize,windowsize)
+    validationDataGenerator = utils.multiInputGenerator(vectorArray,chromatinFactorArray,validationIndices,batchsize,windowsize)
+
+    #neural network constants
     chromLength_bins = 3 * windowsize
     kernelWidth = 1
-    nr_neurons1 = 460
-    nr_neurons2 = 881
-    nr_neurons3 = 1690
-    nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
+    nr_neurons1 = 480
+    nr_neurons2 = 480
+    nr_neurons3 = 240
+    #nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
+    nr_neurons4 = windowsize
 
     #build neural network as described by Farre et al.
     model = Sequential()
