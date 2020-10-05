@@ -142,6 +142,65 @@ def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
         matrixArray[i] = trainmatrix
     return matrixArray
 
+def buildVectorArray(pSparseCsrMatrix, pWindowSize_bins):
+    #extract target values in form of vectors (i.e. anti-diagonals of submatrices) from the sparse matrix
+    #this concept is used e.g. in DeepC by Schwessinger et al.
+    #note that the antidiagonal is a "zig-zag" between the actual anti-diagonal and the first side anti-diagonal
+    nr_vectors = int(pSparseCsrMatrix.shape[0] - 3*pWindowSize_bins + 1)
+    vectorArray = np.empty(shape=(nr_vectors,pWindowSize_bins))
+    for i in tqdm(range(nr_vectors), desc="composing target vector array"):
+        j = i + pWindowSize_bins
+        k = j + pWindowSize_bins
+        #get the two first anti-diagonals of the submatrix by taking the two first diagonals of the flipped submatrix
+        flippedTriuMat = np.flipud(pSparseCsrMatrix[j:k,j:k].todense())
+        upperSideIndex = int(np.floor(pWindowSize_bins/2))
+        #actual anti-diagonal, only upper triangular part needs be kept
+        vectorFront = np.diagonal(flippedTriuMat)[upperSideIndex:]
+        #1st side anti-diagonal, only upper triangluar part needs be kept
+        if pWindowSize_bins % 2 == 0:
+            vectorRear = np.diagonal(flippedTriuMat,-1)[upperSideIndex-1:]
+        else:
+            vectorRear = np.diagonal(flippedTriuMat,-1)[upperSideIndex:]
+        #stack the values into one single target vector
+        vectorArray[i] = np.hstack((vectorFront, vectorRear))
+    return vectorArray
+
+def rebuildMatrixFromVector(pVectorArray):
+    #rebuild the target matrix from predicted "anti-diagonal" vectors
+    #i.e. the actual predictions resemble the upper triangluar part of anti-diagonals of the predicted matrix
+    #put them together to get a matrix
+    windowsize = pVectorArray.shape[1]
+    offset = windowsize
+    targetSize = pVectorArray.shape[0] + 2*offset + windowsize - 1
+    targetMatrix = np.zeros((targetSize,targetSize),dtype="float32")
+    sumMat = np.zeros((windowsize,windowsize),dtype="float32")
+    for i in tqdm(range(pVectorArray.shape[0]), 
+                        desc="rebuilding target matrix from predicted vectors"):
+        #the predicted vectors correspond to upper-triangluar parts of anti-diagonals in the target matrix
+        #note that the "anti-diagonal" here is composed of the actual anti-diagonal and 
+        #the first side anti-diagonal, concatenated into the target vector.
+        #the actual anti-diagonal comes first (:splitIndex), then the side anti-diag (splitIndex:)
+        firstAntiDiag = np.empty(shape=(windowsize,))
+        secondAntiDiag = np.empty(shape=(windowsize-1,))
+        splitIndex = int(np.ceil(windowsize/2))#index vector where to split between anti-diag and first side anti-diag
+        diagIndex = int(np.floor(windowsize/2))#index vector where to put the upper-triangular parts
+        firstAntiDiag[diagIndex:] = pVectorArray[i][:splitIndex]
+        if windowsize % 2 == 0:
+            secondAntiDiag[diagIndex-1:] = pVectorArray[i][splitIndex:]
+        else:
+            secondAntiDiag[diagIndex:] = pVectorArray[i][splitIndex:]
+        #get indices of first lower side diagonal
+        diagIndices2 = (np.diag_indices_from(sumMat)[0][1:], np.diag_indices_from(sumMat)[1][:-1])
+        sumMat[np.diag_indices_from(sumMat)] = firstAntiDiag
+        sumMat[diagIndices2] = secondAntiDiag
+        #set target sub-matrix
+        #note the flip, because the anti-diagonals are stored as diagonals in sumMat
+        j = i + offset
+        k = j + windowsize
+        targetMatrix[j:k,j:k] += np.flipud(sumMat)
+    return targetMatrix
+
+
 def writeCooler(pMatrix, pBinSizeInt, pOutfile, pChromosome, pChromSize=None,  pMetadata=None):
     #takes a matrix as numpy array and writes a cooler matrix from it
     #widely copied from study project
