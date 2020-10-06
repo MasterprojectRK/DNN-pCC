@@ -307,8 +307,8 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         return self.__generateData(indices)
 
     def __generateData(self, indices):
-        factorArray = np.empty((self.batchsize, self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
-        matrixArray = np.empty((self.batchsize, int(self.windowsize*(self.windowsize + 1)/2)))
+        factorArray = np.empty((len(indices), self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
+        matrixArray = np.empty((len(indices), int(self.windowsize*(self.windowsize + 1)/2)))
         for b,i in enumerate(indices):
             if self.sparseMatrix is not None:
                 #first matrix has a windowsize offset from start of chromosome (boundary handling)
