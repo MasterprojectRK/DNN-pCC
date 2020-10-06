@@ -159,7 +159,7 @@ def training(trainmatrix,
     
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = int(np.floor(len(trainIndices)/batchsize) * 20)
+    saveFreqInt = int(np.ceil(len(trainIndices)/batchsize) * 20)
     checkpointFilename = outputpath + "checkpoint_{epoch:05d}.h5"
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
