@@ -366,8 +366,8 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         return self.__generateData(indices)
 
     def __generateData(self, indices):
-        factorArray = np.empty((self.batchsize, self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
-        vectorArray = np.empty((self.batchsize, self.windowsize))
+        factorArray = np.empty((len(indices), self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
+        vectorArray = np.empty((len(indices), self.windowsize))
         for b,i in enumerate(indices):
             if self.vectorArray is not None:
                 vectorArray[b] = np.nan_to_num(self.vectorArray[i])
