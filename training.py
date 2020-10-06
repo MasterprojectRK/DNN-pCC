@@ -153,7 +153,7 @@ def training(trainmatrix,
     model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learningrate), 
                   loss=tf.keras.losses.MeanSquaredError())
     model.summary()
     
@@ -164,10 +164,10 @@ def training(trainmatrix,
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
                                                         save_freq=saveFreqInt)
-    #earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
-    #                                                     min_delta=1e-3,
-    #                                                     patience=5,
-    #                                                     restore_best_weights=True)
+    earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="loss",
+                                                         min_delta=10,
+                                                         patience=300,
+                                                         restore_best_weights=True)
 
     #save the training parameters to a file before starting to train
     #(allows recovering the parameters even if training is aborted
@@ -185,7 +185,7 @@ def training(trainmatrix,
               validation_data= validationDataGenerator,
               callbacks=[tensorboardCallback,
                           checkpointCallback,
-                            #earlyStoppingCallback
+                          earlyStoppingCallback
                            ]
             )
 
