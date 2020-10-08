@@ -2,7 +2,7 @@
 import utils
 import click
 import tensorflow as tf
-from tensorflow.keras.layers import Conv2D,Dense,Dropout,Flatten,Concatenate
+from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D
 from tensorflow.keras.models import Model, Sequential 
 import numpy as np
 from scipy.stats import pearsonr
@@ -120,7 +120,7 @@ def training(trainmatrix,
     #read the DNA sequence and do a one-hot encoding
     encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
     
-    nr_Factors = chromatinFactorArray.shape[0]
+    nr_Factors = chromatinFactorArray.shape[1]
     nr_matrices = sparseHiCMatrix.shape[0] - 3* windowsize + 1
     
     #compute indices for train / validation split 
@@ -132,60 +132,59 @@ def training(trainmatrix,
     validationDataGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,encodedSequenceArray, validationIndices,batchsize,windowsize,binSizeInt)
 
     #neural network constants as per Farre et al.
-    chromLength_bins = 3 * windowsize
     kernelWidth = 1
-    #nr_neurons1 = 460
-    #nr_neurons2 = 881
-    nr_neurons1 = 100
-    nr_neurons2 = 200
-    #nr_neurons3 = 1690
+    nr_neurons1 = 460
+    nr_neurons2 = 881
+    nr_neurons3 = 1690
     nr_neurons4 = int(1/2 * windowsize * (windowsize + 1)) #always an int, even*odd=even
 
     #build neural network as described by Farre et al.
     model = Sequential()
-    model.add(Conv2D(filters=1, 
-                     kernel_size=(nr_Factors,kernelWidth), 
+    model.add(Conv1D(filters=1, 
+                     kernel_size=kernelWidth, 
                      activation="sigmoid",
                      data_format="channels_last",
-                     input_shape=(nr_Factors,chromLength_bins,1)))
+                     input_shape=(3*windowsize,nr_Factors)))
     model.add(Flatten())
     model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
-    #model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
-    #model.add(Dropout(0.1))
+    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
+    model.add(Dropout(0.1))
     #model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
     #model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
     #             loss=tf.keras.losses.MeanSquaredError())
     #model.summary()
     
     model2 = Sequential()
-    model2.add(Conv2D(filters=1, 
-                     kernel_size=(6,5), 
-                     padding="valid",
-                     activation="sigmoid",
-                     data_format="channels_last",
-                     input_shape=(3*windowsize*binSizeInt,5,1)))
-    model2.add(Conv2D(filters=1,
-                      kernel_size=(300,1),
-                      activation="sigmoid",
+    model2.add(Conv1D(filters=5, 
+                      kernel_size=6,
+                      activation="relu",
                       data_format="channels_last",
-                      strides=(3,1)))
-    model2.add(Conv2D(filters=1,kernel_size=(1000,1),
-                      activation="sigmoid",
-                      data_format="channels_last",
-                      strides=(10,1)))
-    model2.add(Conv2D(filters=1,kernel_size=(5000,1),
-                      activation="sigmoid",
-                      data_format="channels_last",
-                      strides=(5,1)))
-    model2.add(Conv2D(filters=1,kernel_size=(10000,1),
-                      activation="sigmoid",
-                      data_format="channels_last",
-                      strides=(10,1)))                              
+                      input_shape=(windowsize*binSizeInt,encodedSequenceArray.shape[1])))
+    model2.add(MaxPool1D(5))
+    model2.add(Conv1D(filters=5,
+                      kernel_size=6,
+                      activation="relu",
+                      data_format="channels_last"))
+    model2.add(MaxPool1D(5))
+    model2.add(Conv1D(filters=5,
+                      kernel_size=10,
+                      activation="relu",
+                      data_format="channels_last"))
+    model2.add(MaxPool1D(5))
+    model2.add(Conv1D(filters=5,
+                      kernel_size=10,
+                      activation="relu",
+                      data_format="channels_last"))
+    model2.add(MaxPool1D(5))
+    model2.add(Conv1D(filters=5,
+                      kernel_size=10,
+                      activation="relu",
+                      data_format="channels_last"))                              
     model2.add(Flatten())
-    model2.add(Dense(20, activation="relu",kernel_regularizer="l2"))
+    model2.add(Dense(nr_neurons3, activation="relu",kernel_regularizer="l2"))
     model2.add(Dropout(0.1))
 
     combined = Concatenate()([model.output,model2.output])

@@ -199,7 +199,8 @@ def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pCh
     #print boxplots, if requested
     if pPlotFilename is not None:
         plotChromatinFactorStats(binnedChromatinFactorArray, pFilename=pPlotFilename)
-    return binnedChromatinFactorArray
+    #return the transpose
+    return np.transpose(binnedChromatinFactorArray)
 
 def plotChromatinFactorStats(pChromFactorArray, pFilename):
     #store box plots of the chromatin factors in the array
@@ -309,9 +310,9 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         return self.__generateData(indices)
 
     def __generateData(self, indices):
-        factorArray = np.empty((len(indices), self.chromatinFactorArray.shape[0], 3*self.windowsize, 1))
+        factorArray = np.empty((len(indices), 3*self.windowsize, self.chromatinFactorArray.shape[1]))
         matrixArray = np.empty((len(indices), int(self.windowsize*(self.windowsize + 1)/2)))
-        seqArray = np.empty((self.batchsize,3*self.windowsize*self.binsize, self.encodedDNAarray.shape[1], 1), dtype="uint8")
+        seqArray = np.empty((len(indices),self.windowsize*self.binsize, self.encodedDNAarray.shape[1]), dtype="uint8")
         for b,i in enumerate(indices):
             if self.sparseMatrix is not None:
                 #first matrix has a windowsize offset from start of chromosome (boundary handling)
@@ -319,11 +320,12 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 k = j + self.windowsize
                 trainmatrix = self.sparseMatrix[j:k,j:k].todense()[np.triu_indices(self.windowsize)]
                 matrixArray[b] = np.nan_to_num(trainmatrix)
-            #the chromatin factors and DNA sequence have no offset
-            factorMat = self.chromatinFactorArray[:,i:i+3*self.windowsize]
-            factorArray[b] = np.expand_dims(factorMat,2)
-            seqMat = self.encodedDNAarray[i:i+3*self.windowsize*self.binsize,:]
-            seqArray[b] = np.expand_dims(seqMat,2)
+            #the chromatin factors have no offset
+            factorArray[b] = self.chromatinFactorArray[i:i+3*self.windowsize,:]
+            #take just the sequence under the current matrix to save memory
+            j = i + self.windowsize*self.binsize
+            k = j + self.windowsize*self.binsize
+            seqArray[b] = self.encodedDNAarray[j:k,:]
         if self.sparseMatrix is not None:
             return [factorArray, seqArray], matrixArray
         else:
