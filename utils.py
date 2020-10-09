@@ -303,7 +303,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         self.on_epoch_end()
 
     def __len__(self):
-        return int(np.floor(len(self.indices)  / self.batchsize))
+        return int(np.ceil(len(self.indices)  / self.batchsize))
 
     def __getitem__(self, index):
         indices = self.indices[index*self.batchsize : (index+1)*self.batchsize]
