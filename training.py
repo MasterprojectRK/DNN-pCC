@@ -191,7 +191,7 @@ def training(trainmatrix,
     x = Dense(nr_neurons4,activation="relu",kernel_regularizer="l2")(combined)
  
     finalModel = Model(inputs=[model.input, model2.input], outputs=x)
-    finalModel.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
+    finalModel.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learningrate), 
                  loss=tf.keras.losses.MeanSquaredError())
     finalModel.summary()
 
