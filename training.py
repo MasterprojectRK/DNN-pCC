@@ -51,6 +51,10 @@ tf.random.set_seed(35)
 @click.option("--scaleFactors","-scf", required=False,
                 type=bool, default=True,
                 help="Scale chromatin factor data to range 0...1 (recommended)")
+@click.option("--optimizer","-opt", required=False,
+                type=click.Choice(["RMSprop", "SGD", "Adam"]),
+                default="Adam",
+                help="Optimizer to use for the network")
 @click.command()
 def training(trainmatrix,
             chromatinpath,
@@ -63,7 +67,8 @@ def training(trainmatrix,
             windowsize,
             scalematrix,
             clampfactors,
-            scalefactors):
+            scalefactors,
+            optimizer):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -146,7 +151,18 @@ def training(trainmatrix,
     model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
+    
+    #add the desired optimizer
+    kerasOptimizer = None
+    if optimizer == "RMSprop":
+        kerasOptimizer =  tf.keras.optimizers.RMSprop(learning_rate=learningrate)
+    elif optimizer == "SGD":
+        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=learningrate)
+    else:
+        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
+    
+    #compile the model and print to screen
+    model.compile(optimizer=kerasOptimizer, 
                   loss=tf.keras.losses.MeanSquaredError())
     model.summary()
     
