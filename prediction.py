@@ -12,8 +12,9 @@ import ast
 @click.option("--chromatinPath","-cp", required=True,
                     type=click.Path(exists=True,readable=True,file_okay=False),
                     help="Path where chromatin factor data in bigwig format resides")
-@click.option("--sequenceFile", "-sf", required=True,
+@click.option("--sequenceFile", "-sf", required=False,
                     type=click.Path(exists=True,readable=True,dir_okay=False),
+                    default=None,
                     help="Path to DNA sequence in fasta format")
 @click.option("--outputPath", "-o", required=True,
                     type=click.Path(exists=True,file_okay=False,writable=True),
@@ -64,6 +65,7 @@ def prediction(validationmatrix,
         batchSizeInt = int(trainParamDict["batchsize"])
         clampfactors = bool(trainParamDict["clampfactors"])
         scalefactors = bool(trainParamDict["scalefactors"])
+        modelType = str(trainParamDict["modeltype"])
         trainmatshape = ast.literal_eval(trainParamDict["train_matrix_shape"])
         #for now, only allow same chrom length as in training
         chromLength_bins = int(trainmatshape[0])
@@ -73,7 +75,7 @@ def prediction(validationmatrix,
         raise SystemExit(msg)
 
     #check whether the window size of the model fits the train params   
-    inputlength = trainedModel.layers[0].input_shape[2]
+    inputlength = trainedModel.layers[0].input_shape[1]
     if inputlength % 3 != 0:
         msg = "Error. Expected input length is {:d} and does not divide by 3"
         msg = msg.format(inputlength)
@@ -85,11 +87,15 @@ def prediction(validationmatrix,
         msg = msg.format(modelWindowSize, windowsize)
         raise SystemExit(msg)
     
+    if modelType == "sequence" and sequencefile is None:
+        msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
+        raise SystemExit(msg)
+
     #load chromatin files first
     #if there are too few or too much, 
     #we can already stop here.
     bigwigFileList = utils.getBigwigFileList(chromatinpath)
-    nr_chromatinFactors = trainedModel.layers[0].input_shape[1]
+    nr_chromatinFactors = trainedModel.layers[0].input_shape[2]
     if len(bigwigFileList) != nr_chromatinFactors:
         msg = "Aborting.\n"
         msg += "Did not find the required number of bigwig files in {:s}\n"
@@ -103,7 +109,9 @@ def prediction(validationmatrix,
         print(factor)
 
     #read the DNA sequence and do a one-hot encoding
-    encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
+    encodedSequenceArray = None
+    if sequencefile is not None:
+        encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
 
     #now load relevant part of Hi-C matrix, if provided,
     #since the bin size will be taken from there
@@ -129,8 +137,15 @@ def prediction(validationmatrix,
                                                            pClampArray=clampfactors,
                                                            pScaleArray=scalefactors)
 
-    predIndices = np.arange(chromatinFactorArray.shape[1] - 3*windowsize + 1)
-    predictionDataGenerator = utils.multiInputGenerator(None,chromatinFactorArray,encodedSequenceArray, predIndices,batchSizeInt,windowsize, binSizeInt, shuffle=False)  
+    predIndices = np.arange(chromatinFactorArray.shape[0] - 3*windowsize + 1)
+    predictionDataGenerator = utils.multiInputGenerator(sparseMatrix=None,
+                                                        chromatinFactorArray=chromatinFactorArray,
+                                                        encodedDNAarray=encodedSequenceArray, 
+                                                        indices=predIndices,
+                                                        batchsize=batchSizeInt,
+                                                        windowsize=windowsize, 
+                                                        binsize=binSizeInt, 
+                                                        shuffle=False)  
 
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
@@ -147,7 +162,14 @@ def prediction(validationmatrix,
     #If target matrix provided, compute some figures 
     #to assess prediction quality
     if validationmatrix is not None:
-        evalGenerator = utils.multiInputGenerator(sparseHiCMatrix,chromatinFactorArray,encodedSequenceArray,predIndices,batchSizeInt,windowsize,binSizeInt,shuffle=False)
+        evalGenerator = utils.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
+                                                  chromatinFactorArray=chromatinFactorArray,
+                                                  encodedDNAarray=encodedSequenceArray,
+                                                  indices=predIndices,
+                                                  batchsize=batchSizeInt,
+                                                  windowsize=windowsize,
+                                                  binsize=binSizeInt,
+                                                  shuffle=False)
         loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
 
