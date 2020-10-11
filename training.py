@@ -88,7 +88,7 @@ def training(trainmatrix,
         print(msg)
 
     #load relevant part of Hi-C matrix
-    sparseHiCMatrix, binSizeInt  = getMatrixFromCooler(trainmatrix,chromosome)
+    sparseHiCMatrix, binSizeInt, chromSizeMatrixInt  = getMatrixFromCooler(trainmatrix,chromosome)
     if sparseHiCMatrix is None:
         msg = "Could not read HiC matrix {:s} for training, check inputs"
         msg = msg.format(trainmatrix)
@@ -125,6 +125,30 @@ def training(trainmatrix,
         paramDict["chromFactor_" + str(i)] = str(factor)
     paramDict["nr_Factors"] = len(bigwigFileList)
 
+    chromSizeFactors_List = [utils.getChromLengthFromBigwig(fn, chromosome) for fn in bigwigFileList]
+    if min(chromSizeFactors_List) != max(chromSizeFactors_List):
+        msg = "Warning: Chromosome lengths are not equal in bigwig files\n"
+        msg += "Recorded lengths: "
+        msg += ", ".join(str(l) for l in chromSizeFactors_List) + "\n"
+        msg += "Using the max. value"
+        print(msg)
+    chromSizeFactorsInt = max(chromSizeFactors_List)
+
+    if chromSizeMatrixInt != chromSizeFactorsInt:
+        msg = "Warning: Matrix and chromatin factors have different chrom. sizes\n"
+        msg += "Matrix: {:d}; Factors: {:d}"
+        msg = msg.format(chromSizeMatrixInt, chromSizeFactorsInt)
+        print(msg)
+        binSizeFactors = int(np.ceil(chromSizeFactorsInt/binSizeInt))
+        if binSizeFactors != sparseHiCMatrix.shape[0]:
+            msg = "Aborting. Binned size also differs."
+            msg += "Matrix: {:d}; Factors: {:d}\n"
+            msg += "Matrix and bigwig files must correspond to same ref. genome"
+            msg = msg.format(sparseHiCMatrix.shape[0], binSizeFactors)
+            raise SystemExit(msg)
+        else:
+            msg = "The number of bins is the same. Continuing..."
+            print(msg)
     #bin the chromatin factors and create a numpy array from them
     plotFilename = outputpath + "chromFactorBoxplots.png"
     chromatinFactorArray = utils.composeChromatinFactors(pBigwigFileList = bigwigFileList,

@@ -124,7 +124,8 @@ def prediction(validationmatrix,
     #now load relevant part of Hi-C matrix, if provided,
     #since the bin size will be taken from there
     if validationmatrix is not None:
-        sparseHiCMatrix, binSizeInt2  = utils.getMatrixFromCooler(validationmatrix,chromosome)
+        sparseHiCMatrix, binSizeInt2, chromLengthInt = utils.getMatrixFromCooler(validationmatrix,chromosome)
+        del(chromLengthInt)
         if sparseHiCMatrix is None:
             msg = "Could not read HiC matrix {:s} for training, check inputs"
             msg = msg.format(validationmatrix)

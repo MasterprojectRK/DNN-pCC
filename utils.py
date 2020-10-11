@@ -46,14 +46,16 @@ def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
     #returns sparse matrix from cooler file for given chromosome name
     sparseMatrix = None
     binSizeInt = 0
+    chromSizeInt = 0
     try:
         coolerMatrix = cooler.Cooler(pCoolerFilePath)
         sparseMatrix = coolerMatrix.matrix(sparse=True,balance=False).fetch(pChromNameStr)
         binSizeInt = coolerMatrix.binsize
+        chromSizeInt = coolerMatrix.chromsizes[pChromNameStr]
     except Exception as e:
         print(e)
     sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
-    return sparseMatrix, binSizeInt
+    return sparseMatrix, binSizeInt, chromSizeInt
 
 def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
     #bin chromatin factor loaded from bigwig file pBigwigFileName with bin size pBinSizeInt for chromosome pChromStr
