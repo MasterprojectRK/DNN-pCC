@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 import csv
 import ast
+import os
 
 
 @click.option("--validationmatrix","-vm", required=False,
@@ -67,25 +68,13 @@ def prediction(validationmatrix,
         scalefactors = bool(trainParamDict["scalefactors"])
         modelType = str(trainParamDict["modeltype"])
         trainmatshape = ast.literal_eval(trainParamDict["train_matrix_shape"])
-        #for now, only allow same chrom length as in training
-        chromLength_bins = int(trainmatshape[0])
+        nr_Factors = int(trainParamDict["nr_Factors"])
+        factorNameList = [os.path.basename(trainParamDict["chromFactor_" + str(i)]) for i in range(nr_Factors)]
     except Exception as e:
         msg = "Aborting. Parameter not in param file or wrong data type:\n{:s}"
         msg = msg.format(str(e))
         raise SystemExit(msg)
 
-    #check whether the window size of the model fits the train params   
-    inputlength = trainedModel.layers[0].input_shape[1]
-    if inputlength % 3 != 0:
-        msg = "Error. Expected input length is {:d} and does not divide by 3"
-        msg = msg.format(inputlength)
-        raise SystemExit(msg)
-    modelWindowSize = int(inputlength / 3)
-    if modelWindowSize != windowsize:
-        msg = "Error. Windowsize in trainParam file does not match trained model\n."
-        msg += "Trained Model: {:d}, Param File {:d}"
-        msg = msg.format(modelWindowSize, windowsize)
-        raise SystemExit(msg)
     
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
@@ -95,18 +84,37 @@ def prediction(validationmatrix,
     #if there are too few or too much, 
     #we can already stop here.
     bigwigFileList = utils.getBigwigFileList(chromatinpath)
-    nr_chromatinFactors = trainedModel.layers[0].input_shape[2]
-    if len(bigwigFileList) != nr_chromatinFactors:
+    if len(bigwigFileList) != nr_Factors:
         msg = "Aborting.\n"
         msg += "Did not find the required number of bigwig files in {:s}\n"
         msg += "Required: {:d}, Found: {:d}"
-        msg = msg.format(chromatinpath, nr_chromatinFactors, len(bigwigFileList))
+        msg = msg.format(chromatinpath, nr_Factors, len(bigwigFileList))
         raise SystemExit(msg)
     msg = "Found {:d} chromatin factors in {:s}."
     msg = msg.format(len(bigwigFileList),chromatinpath)
     print(msg)
-    for factor in bigwigFileList:
+    for i, factor in enumerate(bigwigFileList):
         print(factor)
+        if os.path.basename(factor) != factorNameList[i]:
+            msg = "Warning: Chromatin factor with different name.\n"
+            msg += "Training: {:s}; Prediction: {:s}"
+            msg = msg.format(factorNameList[i], factor)
+            print (msg)
+    
+    #get the chrom length for all files and check if it is the same
+    chromLengthList = [utils.getChromLengthFromBigwig(fn, chromosome) for fn in bigwigFileList]
+    if min(chromLengthList) != max(chromLengthList):
+        msg = "Warning: Chromosome lengths are not equal in bigwig files\n"
+        msg += "Recorded lengths: "
+        msg += ", ".join(str(l) for l in chromLengthList) + "\n"
+        msg += "Using the max. value"
+        print(msg)
+    chromLength_bins = int(np.ceil( max(chromLengthList)/binSizeInt ))
+    if chromLength_bins != trainmatshape[0]:
+        msg = "Info: chrom length and train matrix shape differ\n"
+        msg += "This is normal when predicting for a different chromosome.\n"
+        msg += "But apart from that, it should not happen"
+        print(msg)
 
     #read the DNA sequence and do a one-hot encoding
     encodedSequenceArray = None

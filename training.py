@@ -36,7 +36,7 @@ tf.random.set_seed(35)
                 type=click.FloatRange(min=1e-10), default=1e-1,
                 help="learning rate for stochastic gradient descent")
 @click.option("--numberEpochs", "-ep", required=True,
-                type=click.IntRange(min=20), default=1000,
+                type=click.IntRange(min=2), default=1000,
                 help="number of epochs for training the neural network")
 @click.option("--batchsize", "-bs", required=True,
                 type=click.IntRange(min=5), default=30,
@@ -82,8 +82,9 @@ def training(trainmatrix,
         raise SystemExit(msg)
     if modelTypeStr != "sequence" and sequencefile is not None:
         modelTypeStr = "sequence"
-        msg = "Sequence file provided, but model type sequence not selected.\n" 
-        msg += "Changed model type to >>sequence<<"
+        paramDict["modeltype"] = modelTypeStr
+        msg = "Sequence file provided, but model type >sequence< not selected.\n" 
+        msg += "Changed model type to >sequence<"
         print(msg)
 
     #load relevant part of Hi-C matrix
@@ -119,9 +120,11 @@ def training(trainmatrix,
     msg = "Found {:d} chromatin factors in {:s}:"
     msg = msg.format(len(bigwigFileList),chromatinpath)
     print(msg)
-    for factor in bigwigFileList:
+    for i, factor in enumerate(bigwigFileList):
         print(" ", factor)
-    
+        paramDict["chromFactor_" + str(i)] = str(factor)
+    paramDict["nr_Factors"] = len(bigwigFileList)
+
     #bin the chromatin factors and create a numpy array from them
     plotFilename = outputpath + "chromFactorBoxplots.png"
     chromatinFactorArray = utils.composeChromatinFactors(pBigwigFileList = bigwigFileList,
@@ -164,18 +167,18 @@ def training(trainmatrix,
     nr_symbols = None
     if encodedSequenceArray is not None:
         nr_symbols = encodedSequenceArray.shape[1]
+    paramDict["nr_symbols"] = nr_symbols
+
+    #build the requested model
     model = utils.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
                                     pBinSizeInt=binSizeInt,
                                     pNrFactors=nr_Factors,
                                     pNrSymbols=nr_symbols)
-
     kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
-    
     model.compile(optimizer=kerasOptimizer, 
                  loss=tf.keras.losses.MeanSquaredError())
     model.summary()
-
 
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)

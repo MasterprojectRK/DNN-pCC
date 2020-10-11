@@ -22,6 +22,25 @@ def getBigwigFileList(pDirectory):
             retList.append(pDirectory + file)
     return retList
 
+def getChromLengthFromBigwig(pBigwigFileName, pChrom):
+    chromLength1 = None
+    chromLength2 = None
+    chromNameStr = str(pChrom)
+    try:
+        bigwigFile = pyBigWig.open(pBigwigFileName)
+        properFileType = bigwigFile.isBigWig()
+    except Exception as e:
+        print(e) 
+    if properFileType:
+        #try both naming variants
+        chromLength1 = bigwigFile.chroms(chromNameStr)
+        chromLength2 = bigwigFile.chroms("chr" + chromNameStr)
+    if chromLength1 is None and chromLength2 is None:
+        return None  #non-existent chromosome
+    elif chromLength1 is not None:
+        return int(chromLength1)
+    else:
+        return int(chromLength2) 
 
 def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
     #returns sparse matrix from cooler file for given chromosome name
