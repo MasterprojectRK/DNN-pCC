@@ -403,7 +403,7 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
                       activation="relu",
                       data_format="channels_last"))                              
     model2.add(Flatten())
-    model2.add(Dense(nr_neurons3, activation="relu",kernel_regularizer="l2"))
+    model2.add(Dense(nr_neurons2, activation="relu",kernel_regularizer="l2"))
     model2.add(Dropout(0.1))
     combined = Concatenate()([model1.output,model2.output])
     x = Dense(out_neurons,activation="relu",kernel_regularizer="l2")(combined)
