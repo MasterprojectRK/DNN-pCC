@@ -1,4 +1,5 @@
 import utils
+import models
 import click
 import tensorflow as tf
 import numpy as np
@@ -147,7 +148,7 @@ def prediction(validationmatrix,
                                                            pScaleArray=scalefactors)
 
     predIndices = np.arange(chromatinFactorArray.shape[0] - 3*windowsize + 1)
-    predictionDataGenerator = utils.multiInputGenerator(sparseMatrix=None,
+    predictionDataGenerator = models.multiInputGenerator(sparseMatrix=None,
                                                         chromatinFactorArray=chromatinFactorArray,
                                                         encodedDNAarray=encodedSequenceArray, 
                                                         indices=predIndices,
@@ -171,7 +172,7 @@ def prediction(validationmatrix,
     #If target matrix provided, compute some figures 
     #to assess prediction quality
     if validationmatrix is not None:
-        evalGenerator = utils.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
+        evalGenerator = models.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
                                                   chromatinFactorArray=chromatinFactorArray,
                                                   encodedDNAarray=encodedSequenceArray,
                                                   indices=predIndices,

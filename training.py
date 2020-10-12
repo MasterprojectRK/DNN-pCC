@@ -1,5 +1,6 @@
 #!python3
 import utils
+import models
 import click
 import tensorflow as tf
 import numpy as np
@@ -172,14 +173,14 @@ def training(trainmatrix,
     validationIndices = np.setdiff1d(range(nr_matrices),trainIndices)
 
     #generators for training and validation data
-    trainDataGenerator = utils.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
+    trainDataGenerator = models.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
                                                    chromatinFactorArray=chromatinFactorArray, 
                                                    encodedDNAarray=encodedSequenceArray, 
                                                    indices=trainIndices,
                                                    batchsize=batchsize,
                                                    windowsize=windowsize,
                                                    binsize=binSizeInt)
-    validationDataGenerator = utils.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
+    validationDataGenerator = models.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
                                                         chromatinFactorArray=chromatinFactorArray,
                                                         encodedDNAarray=encodedSequenceArray, 
                                                         indices=validationIndices,
@@ -194,7 +195,7 @@ def training(trainmatrix,
     paramDict["nr_symbols"] = nr_symbols
 
     #build the requested model
-    model = utils.buildModel(pModelTypeStr=modelTypeStr, 
+    model = models.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
                                     pBinSizeInt=binSizeInt,
                                     pNrFactors=nr_Factors,
