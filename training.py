@@ -79,7 +79,7 @@ def training(trainmatrix,
     #check if chosen model type matches inputs
     modelTypeStr = modeltype
     if modelTypeStr == "sequence" and sequencefile is None:
-        msg = "Aborting. Cannot use model type sequence without providing a sequence file (-sf option)"
+        msg = "Aborting. Cannot use model type >sequence< without providing a sequence file (-sf option)"
         raise SystemExit(msg)
     if modelTypeStr != "sequence" and sequencefile is not None:
         modelTypeStr = "sequence"
@@ -91,7 +91,7 @@ def training(trainmatrix,
     #load relevant part of Hi-C matrix
     sparseHiCMatrix, binSizeInt, chromSizeMatrixInt  = getMatrixFromCooler(trainmatrix,chromosome)
     if sparseHiCMatrix is None:
-        msg = "Could not read HiC matrix {:s} for training, check inputs"
+        msg = "Could not read Hi-C matrix {:s} for training, check inputs"
         msg = msg.format(trainmatrix)
         raise SystemExit(msg)
     msg = "Cooler matrix {:s} loaded.\nBin size (resolution) is {:d}bp."
