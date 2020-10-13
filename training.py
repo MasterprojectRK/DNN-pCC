@@ -7,6 +7,7 @@ import numpy as np
 from scipy.stats import pearsonr
 import csv
 import os
+from Bio import SeqIO
 
 from utils import getBigwigFileList, getMatrixFromCooler, binChromatinFactor, scaleArray
 from tqdm import tqdm
@@ -20,10 +21,22 @@ tf.random.set_seed(35)
                     multiple=True,
                     type=click.Path(exists=True,dir_okay=False,readable=True),
                     help="Training matrix in cooler format")
-@click.option("--chromatinPaths","-cp", required=True,
+@click.option("--trainChromatinPaths","-tcp", required=True,
                     multiple=True,
                     type=click.Path(exists=True,readable=True,file_okay=False),
-                    help="Path where chromatin factor data in bigwig format resides")
+                    help="Path where chromatin factor data in bigwig format resides (training)")
+@click.option("--trainChromosomes", "-tchroms", required=True,
+              type=str, default="17", help="chromosome(s) to train on; separate multiple chromosomes by spaces")
+@click.option("--validationMatrices", "-vm", required=True,
+                    multiple=True,
+                    type=click.Path(exists=True,dir_okay=False, readable=True),
+                    help="Validation matrix in cooler format")
+@click.option("--validationChromatinPaths","-vcp", required=True,
+                    multiple=True,
+                    type=click.Path(exists=True,file_okay=False,readable=True),
+                    help="Path where chromatin factor data in bigwig format resides (validation)")
+@click.option("--validationChromosomes", "-vchroms", required=True,
+                    type=str, help="chromosomes for validation; separate multiple chromosomes by spaces")
 @click.option("--sequenceFile", "-sf", required=False,
                     type=click.Path(exists=True,readable=True,dir_okay=False),
                     default=None,
@@ -31,8 +44,6 @@ tf.random.set_seed(35)
 @click.option("--outputPath", "-o", required=True,
                     type=click.Path(exists=True,file_okay=False,writable=True),
                     help="Output path where trained network will be stored")
-@click.option("--chromosomes", "-chroms", required=True,
-              type=str, default="17", help="chromosome(s) to train on; separate multiple chromosomes by spaces")
 @click.option("--modelfilepath", "-mfp", required=True, 
               type=click.Path(writable=True,dir_okay=False), 
               default="trainedModel.h5", help="path+filename for trained model")
@@ -63,10 +74,13 @@ tf.random.set_seed(35)
                 help="Type of model to use")
 @click.command()
 def training(trainmatrices,
-            chromatinpaths,
+            trainchromatinpaths,
+            trainchromosomes,
+            validationmatrices,
+            validationchromatinpaths,
+            validationchromosomes,
             sequencefile,
             outputpath,
-            chromosomes,
             modelfilepath,
             learningrate,
             numberepochs,
@@ -82,144 +96,67 @@ def training(trainmatrices,
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
     #from different cell lines
-    if len(trainmatrices) != len(chromatinpaths):
+    if len(trainmatrices) != len(trainchromatinpaths):
         msg = "Number of train matrices and chromatin paths must match\n"
-        msg += "Current numbers: Train matrices: {:d}; Chromatin Paths: {:d}"
-        msg = msg.format(len(trainmatrices), len(chromatinpaths))
+        msg += "Current numbers: Matrices: {:d}; Chromatin Paths: {:d}"
+        msg = msg.format(len(trainmatrices), len(trainchromatinpaths))
         raise SystemExit(msg)
+    if len(validationmatrices) != len(validationchromatinpaths):
+        msg = "Number of validation matrices and chromatin paths must match\n"
+        msg += "Current numbers: Matrices: {:d}; Chromatin Paths: {:d}"
+        msg = msg.format(len(validationmatrices), len(validationchromatinpaths))
+        raise SystemExit(msg) 
 
     #extract chromosome names and size from the input
-    chromNameList = chromosomes.rstrip().split(" ")  
-    chromNameList = [x.lstrip("chr") for x in chromNameList]  
+    trainChromNameList = trainchromosomes.rstrip().split(" ")  
+    trainChromNameList = [x.lstrip("chr") for x in trainChromNameList]  
     #check if all requested chroms are present in all train matrices
-    trainMatricesDict = checkGetChromsPresentInMatrices(trainmatrices,chromNameList)
+    trainMatricesDict = checkGetChromsPresentInMatrices(trainmatrices,trainChromNameList)
     #check if all requested chroms are present in all bigwig files
     #and check if the chromosome lengths are equal for all bigwig files in each folder
-    trainChromFactorsDict = checkGetChromsPresentInFactors(chromatinpaths,chromNameList)
+    trainChromFactorsDict = checkGetChromsPresentInFactors(trainchromatinpaths,trainChromNameList)
     #check if the chromosome lengths from the bigwig files match the ones from the matrices
-    checkChromSizesMatching(trainMatricesDict, trainChromFactorsDict, chromNameList)
+    checkChromSizesMatching(trainMatricesDict, trainChromFactorsDict, trainChromNameList)
+
+    #repeat the steps above for the validation matrices and chromosomes
+    validationChromNameList = validationchromosomes.rstrip().split(" ")
+    validationChromNameList = [x.lstrip("chr") for x in validationChromNameList]
+    validationMatricesDict = checkGetChromsPresentInMatrices(validationmatrices, validationChromNameList)
+    validationChromFactorsDict = checkGetChromsPresentInFactors(validationchromatinpaths, validationChromNameList)
+    checkChromSizesMatching(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
 
     #check if chosen model type matches inputs
-    modelTypeStr = modeltype
-    if modelTypeStr == "sequence" and sequencefile is None:
-        msg = "Aborting. Cannot use model type >sequence< without providing a sequence file (-sf option)"
-        raise SystemExit(msg)
-    if modelTypeStr != "sequence" and sequencefile is not None:
-        modelTypeStr = "sequence"
-        paramDict["modeltype"] = modelTypeStr
-        msg = "Sequence file provided, but model type >sequence< not selected.\n" 
-        msg += "Changed model type to >sequence<"
-        print(msg)
+    modelTypeStr = checkSetModelTypeStr(modeltype, sequencefile)
+    paramDict["modeltype"] = modelTypeStr
 
-    #load relevant parts of Hi-C matrices
-    for mName in trainMatricesDict:
-        dataDict = dict()
-        for chromname in trainMatricesDict[mName]["chromsizes"]:
-            sparseHiCMatrix, binSizeInt = getMatrixFromCooler(mName,chromname)
-            if sparseHiCMatrix is None:
-                msg = "Could not read Hi-C matrix {:s} for training, check inputs"
-                msg = msg.format(mName)
-                raise SystemExit(msg)
-            if scalematrix: #scale matrix to 0..1, if requested
-                sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)
-            dataDict[chromname] = sparseHiCMatrix
-            trainMatricesDict[mName]["binsize"] = binSizeInt #is the same for all chroms anyway
-        trainMatricesDict[mName]["data"] = dataDict
-        msg = "Cooler matrix {:s} loaded.\nBin size (resolution) is {:d}bp.\n"
-        msg = msg.format(mName, trainMatricesDict[mName]["binsize"])
-        chromList = [name for name in trainMatricesDict[mName]["chromsizes"]]
-        chromSizeList = [size for size in [trainMatricesDict[mName]["chromsizes"][name] for name in chromList]]
-        matShapeList = [mat.shape for mat in [trainMatricesDict[mName]["data"][name] for name in chromList]]
-        minList = [mat.min() for mat in [trainMatricesDict[mName]["data"][name] for name in chromList]]
-        maxList = [mat.max() for mat in [trainMatricesDict[mName]["data"][name] for name in chromList]]
-        shapeMsg = []
-        for name, size, shapeTuple, minVal, maxVal in zip(chromList, chromSizeList, matShapeList, minList, maxList):
-            s = "Chromosome: {:s} - Length {:d} - Matrix shape ({:s}) - min. {:.1f} - max. {:.1f}"
-            s = s.format(str(name), size, ", ".join(str(s) for s in shapeTuple), minVal, maxVal)
-            shapeMsg.append(s)
-        msg += "\n".join(shapeMsg)
-        print(msg)
+    #load sparse Hi-C matrices per chromosome
+    #scale and normalize, if requested
+    loadMatricesPerChrom(trainMatricesDict, scalematrix, windowsize)
+    loadMatricesPerChrom(validationMatricesDict, scalematrix, windowsize)
 
-    #matrix distance normalization, divide values in each side diagonal by their average
-    ##possible and even quite fast, but doesn't look reasonable
-    #sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, windowsize)
-
-
-    #check chromatin files
-    bigwigFileList = getBigwigFileList(chromatinpath)
-    if len(bigwigFileList) == 0:
-        msg = "No bigwig files (*.bigwig, *.bigWig, *.bw) found in {:s}. Aborting."
-        msg = msg.format(chromatinpath)
-        raise SystemExit(msg)
-    msg = "Found {:d} chromatin factors in {:s}:"
-    msg = msg.format(len(bigwigFileList),chromatinpath)
-    print(msg)
-    for i, factor in enumerate(bigwigFileList):
-        print(" ", factor)
-        paramDict["chromFactor_" + str(i)] = str(factor)
-    paramDict["nr_Factors"] = len(bigwigFileList)
-
-    chromSizeFactors_List = [utils.getChromLengthFromBigwig(fn, chromosome) for fn in bigwigFileList]
-    if min(chromSizeFactors_List) != max(chromSizeFactors_List):
-        msg = "Warning: Chromosome lengths are not equal in bigwig files\n"
-        msg += "Recorded lengths: "
-        msg += ", ".join(str(l) for l in chromSizeFactors_List) + "\n"
-        msg += "Using the max. value"
-        print(msg)
-    chromSizeFactorsInt = max(chromSizeFactors_List)
-
-    if chromSizeMatrixInt != chromSizeFactorsInt:
-        msg = "Warning: Matrix and chromatin factors have different chrom. sizes\n"
-        msg += "Matrix: {:d}; Factors: {:d}"
-        msg = msg.format(chromSizeMatrixInt, chromSizeFactorsInt)
-        print(msg)
-        binSizeFactors = int(np.ceil(chromSizeFactorsInt/binSizeInt))
-        if binSizeFactors != sparseHiCMatrix.shape[0]:
-            msg = "Aborting. Binned size also differs."
-            msg += "Matrix: {:d}; Factors: {:d}\n"
-            msg += "Matrix and bigwig files must correspond to same ref. genome"
-            msg = msg.format(sparseHiCMatrix.shape[0], binSizeFactors)
-            raise SystemExit(msg)
-        else:
-            msg = "The number of bins is the same. Continuing..."
-            print(msg)
-    #bin the chromatin factors and create a numpy array from them
-    plotFilename = outputpath + "chromFactorBoxplots.png"
-    chromatinFactorArray = utils.composeChromatinFactors(pBigwigFileList = bigwigFileList,
-                                                         pChromLength_bins = sparseHiCMatrix.shape[0],
-                                                         pBinSizeInt = binSizeInt,
-                                                         pChromosomeStr = chromosome,
-                                                         pPlotFilename = plotFilename,
-                                                         pClampArray=clampfactors,
-                                                         pScaleArray=scalefactors)
-
-    #read the DNA sequence and do a one-hot encoding
-    encodedSequenceArray = None
-    if modelTypeStr == "sequence" and sequencefile is not None:
-        encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
+    #load, bin and aggregate the chromatin factors into a numpy array
+    #of size #matrix_size_in_bins x nr_chromatin_factors
+    #loading is per corresponding training matrix (per folder)
+    #and the bin sizes also correspond to the matrices
+    loadChromatinFactorDataPerMatrix(trainMatricesDict,trainChromFactorsDict, trainChromNameList)
+    loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
     
-    nr_Factors = chromatinFactorArray.shape[1]
-    nr_matrices = sparseHiCMatrix.shape[0] - 3* windowsize + 1
+    #check if DNA sequences for all chroms are there and correspond wit matrices/chromatin factors
+    #do not load them in memory yet, only store paths and ids in the dicts
+    #the generator can then load sequence data as required
+    getCheckSequences(trainMatricesDict,trainChromFactorsDict, sequencefile)
+    getCheckSequences(validationMatricesDict, validationChromFactorsDict, sequencefile)
     
-    #compute indices for train / validation split 
-    trainIndices = np.random.choice(range(nr_matrices), size=(int(0.8*nr_matrices)), replace=False)
-    validationIndices = np.setdiff1d(range(nr_matrices),trainIndices)
 
     #generators for training and validation data
-    trainDataGenerator = models.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
-                                                   chromatinFactorArray=chromatinFactorArray, 
-                                                   encodedDNAarray=encodedSequenceArray, 
-                                                   indices=trainIndices,
-                                                   batchsize=batchsize,
-                                                   windowsize=windowsize,
-                                                   binsize=binSizeInt)
-    validationDataGenerator = models.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
-                                                        chromatinFactorArray=chromatinFactorArray,
-                                                        encodedDNAarray=encodedSequenceArray, 
-                                                        indices=validationIndices,
+    trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
+                                                        factorDict=trainChromFactorsDict,
                                                         batchsize=batchsize,
-                                                        windowsize=windowsize,
-                                                        binsize=binSizeInt)
+                                                        windowsize=windowsize)
+    validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
+                                                        factorDict=validationChromFactorsDict,
+                                                        batchsize=batchsize,
+                                                        windowsize=windowsize)
 
     #get the number of symbols in the DNA sequence (usually 5 or 4)
     nr_symbols = None
@@ -301,7 +238,7 @@ def training(trainmatrices,
     # print("MSE", mse)
 
 def checkGetChromsPresentInMatrices(pTrainmatrices, pChromNameList):
-    chromSizesInMatrices = dict()
+    matrixDict = dict()
     #get the chrom names and sizes present in the matrices
     for matrixName in pTrainmatrices:
         tmpMatDict = dict()
@@ -317,12 +254,12 @@ def checkGetChromsPresentInMatrices(pTrainmatrices, pChromNameList):
             tmpMatDict["namePrefix"] = "chr"
         else:
             tmpMatDict["namePrefix"] = ""
-        chromSizesInMatrices[matrixName] = tmpMatDict
+        matrixDict[matrixName] = tmpMatDict
     #check if all requested chromosomes are present in all matrices
     missingChroms = dict()
-    for matrixName in chromSizesInMatrices:
-        fullChromNameList = [chromSizesInMatrices[matrixName]["namePrefix"] + name for name in pChromNameList]
-        missingChromList = [x for x in fullChromNameList if x not in chromSizesInMatrices[matrixName]["chromsizes"]]
+    for matrixName in matrixDict:
+        fullChromNameList = [matrixDict[matrixName]["namePrefix"] + name for name in pChromNameList]
+        missingChromList = [x for x in fullChromNameList if x not in matrixDict[matrixName]["chromsizes"]]
         if len(missingChromList) > 0:
             missingChroms[matrixName] = missingChromList
     if len(missingChroms) > 0:
@@ -335,9 +272,9 @@ def checkGetChromsPresentInMatrices(pTrainmatrices, pChromNameList):
     sizeDict = dict()
     for chromName in pChromNameList:
         sizeList = []
-        for matrixName in chromSizesInMatrices:
-            fullname = chromSizesInMatrices[matrixName]["namePrefix"] + chromName
-            sizeList.append(chromSizesInMatrices[matrixName]["chromsizes"][fullname])
+        for matrixName in matrixDict:
+            fullname = matrixDict[matrixName]["namePrefix"] + chromName
+            sizeList.append(matrixDict[matrixName]["chromsizes"][fullname])
         if len(set(sizeList)) > 1:
             sizeDict[chromName] = sizeList     
     if len(sizeDict) > 0:
@@ -347,21 +284,24 @@ def checkGetChromsPresentInMatrices(pTrainmatrices, pChromNameList):
         msg += "\n".join(["chrom. " + str(chrom) + "- sizes:" + " ".join(sizeDict[chrom]) for chrom in sizeDict]) 
         print(msg)
     #restrict the output to the requested chromosomes
-    for matrixName in chromSizesInMatrices:
-        fullChromNameList = [chromSizesInMatrices[matrixName]["namePrefix"] + name for name in pChromNameList]
-        chromSizesInMatrices[matrixName]["chromsizes"] = {k:chromSizesInMatrices[matrixName]["chromsizes"][k] for k in fullChromNameList}
-    return chromSizesInMatrices
+    for matrixName in matrixDict:
+        fullChromNameList = [matrixDict[matrixName]["namePrefix"] + name for name in pChromNameList]
+        matrixDict[matrixName]["chromsizes"] = {k:matrixDict[matrixName]["chromsizes"][k] for k in fullChromNameList}
+    return matrixDict
 
 def checkGetChromsPresentInFactors(pChromatinpaths, pChromNameList):
     #load size data from all chromatin factors into a dict with the following structure:
-    #folder1 - bw1 - name:size dict
-    #              - namePrefix (e.g. "chr")
-    #        - bw2 - name:size dict
-    #              - namePrefix
+    #folder1 - bigwigs - bw1 - chromsizes - name:size dict
+    #                        - namePrefix (e.g. "chr")
+    #                  - bw2 - chromsizes - name:size dict
+    #                        - namePrefix
+    #                 - ...
+    #        - nr_factors
     #etc.
     chromFactorDict = dict()
     for folder in pChromatinpaths:
         folderDict = dict()
+        folderDict["bigwigs"] = dict()
         for bigwigfile in utils.getBigwigFileList(folder):
             bwDict = dict()
             bwDict["chromsizes"] = utils.getChromSizesFromBigwig(bigwigfile)
@@ -369,27 +309,28 @@ def checkGetChromsPresentInFactors(pChromatinpaths, pChromNameList):
                 bwDict["namePrefix"] = "chr"
             else:
                 bwDict["namePrefix"] = ""
-            folderDict[os.path.basename(bigwigfile)] = bwDict
+            folderDict["bigwigs"][os.path.basename(bigwigfile)] = bwDict
         chromFactorDict[folder] = folderDict
+        chromFactorDict[folder]["nr_factors"] = len(chromFactorDict[folder]["bigwigs"])
     #check if the same number of chromatin factors is present in each folder
     if len(chromFactorDict) == 0:
         msg = "Aborting. Error loading bigwig files. Wrong format?"
         raise SystemExit(msg)
-    nr_factorsInFolder = [len(y) for y in [chromFactorDict[x] for x in chromFactorDict]]
+    nr_factorsInFolder = [chromFactorDict[folder]["nr_factors"] for folder in chromFactorDict]
     if min(nr_factorsInFolder) != max(nr_factorsInFolder):
         msg = "Aborting. Number of chromatin factors in folders not equal"
         raise SystemExit(msg)
     nr_factorsInFolder = max(nr_factorsInFolder)
-    #issue a warning if the file names are different
+    #Abort if the file names are different
     #this is the case when there are more filenames than chromatin factors in each single folder
     fileNameSet = set()
     for folder in chromFactorDict:
-        for bigwigfile in chromFactorDict[folder]:
+        for bigwigfile in chromFactorDict[folder]["bigwigs"]:
             fileNameSet.add(bigwigfile)
     if len(fileNameSet) > nr_factorsInFolder:
-        msg = "Warning: the names of the chromatin factors are not equal in each folder\n"
+        msg = "Aborting. The names of the chromatin factors are not equal in each folder\n"
         msg += "Filenames:" + ", ".join(sorted(list(fileNameSet)))
-        print(msg)
+        raise SystemExit(msg)
     #check if chromosomes are missing or have different lengths within the same folder
     #different lengths across folders is permitted, provided that the lengths are
     #equal to the ones from the corresponding matrices (to be checked separately)
@@ -398,9 +339,9 @@ def checkGetChromsPresentInFactors(pChromatinpaths, pChromNameList):
     for chrom in pChromNameList:
         for folder in chromFactorDict:
             folderChromLengthList = []
-            for bwfile in chromFactorDict[folder]:
-                csDict = chromFactorDict[folder][bwfile]["chromsizes"]
-                csPrefix = chromFactorDict[folder][bwfile]["namePrefix"]
+            for bwfile in chromFactorDict[folder]["bigwigs"]:
+                csDict = chromFactorDict[folder]["bigwigs"][bwfile]["chromsizes"]
+                csPrefix = chromFactorDict[folder]["bigwigs"][bwfile]["namePrefix"]
                 fullChromName = csPrefix + chrom
                 if fullChromName not in csDict:
                     missingChromList.append([folder, bwfile, fullChromName])
@@ -419,25 +360,25 @@ def checkGetChromsPresentInFactors(pChromatinpaths, pChromNameList):
     #restrict the output to just the requested chromosomes.
     #we now know that they are all there and have the same length in each folder
     for folder in chromFactorDict:
-        for bigwigfile in chromFactorDict[folder]:
-            fullChromNameList = [chromFactorDict[folder][bigwigfile]["namePrefix"] + chromName for chromName in pChromNameList]
-            chromFactorDict[folder][bigwigfile]["chromsizes"] = {k:chromFactorDict[folder][bigwigfile]["chromsizes"][k] for k in fullChromNameList}    
+        for bigwigfile in chromFactorDict[folder]["bigwigs"]:
+            fullChromNameList = [chromFactorDict[folder]["bigwigs"][bigwigfile]["namePrefix"] + chromName for chromName in pChromNameList]
+            chromFactorDict[folder]["bigwigs"][bigwigfile]["chromsizes"] = {k:chromFactorDict[folder]["bigwigs"][bigwigfile]["chromsizes"][k] for k in fullChromNameList}    
     return chromFactorDict
 
-def checkChromSizesMatching(pMatrixChromSizesDict, pFactorsChromSizesDict, pChromNameList):
+def checkChromSizesMatching(pMatricesDict, pFactorsDict, pChromNameList):
     #check if the matrices and the chromatin factors (bigwig files) in the corresponding folder
     #have the same chromosome length
-    for mName,fFolder in zip(pMatrixChromSizesDict, pFactorsChromSizesDict):
+    for mName,fFolder in zip(pMatricesDict, pFactorsDict):
         for chromName in pChromNameList:
             #get the full names and lengths of the relevant chromosomes
             #it has already been checked that the bigwig files have equal
             #chrom lengths within each folder, so looking at the first 
             #one in each folder is enough
-            fullChromName_matrix = pMatrixChromSizesDict[mName]["namePrefix"] + chromName
-            firstKey = str(list(pFactorsChromSizesDict[fFolder].keys())[0])
-            fullChromName_factor1 = pFactorsChromSizesDict[fFolder][firstKey]["namePrefix"] + chromName
-            chromLengthMatrix = pMatrixChromSizesDict[mName]["chromsizes"][fullChromName_matrix]
-            chromLengthFactors = pFactorsChromSizesDict[fFolder][firstKey]["chromsizes"][fullChromName_factor1]
+            fullChromName_matrix = pMatricesDict[mName]["namePrefix"] + chromName
+            firstBigwigFilename = str(list(pFactorsDict[fFolder]["bigwigs"].keys())[0])
+            fullChromName_factor1 = pFactorsDict[fFolder]["bigwigs"][firstBigwigFilename]["namePrefix"] + chromName
+            chromLengthMatrix = pMatricesDict[mName]["chromsizes"][fullChromName_matrix]
+            chromLengthFactors = pFactorsDict[fFolder]["bigwigs"][firstBigwigFilename]["chromsizes"][fullChromName_factor1]
             if chromLengthFactors != chromLengthMatrix:
                 msg = "Aborting. Chromosome length difference between matrix and chromatin factors\n"
                 msg += "Matrix {:s} - Chrom {:s} - Length {:d} \n"
@@ -445,6 +386,122 @@ def checkChromSizesMatching(pMatrixChromSizesDict, pFactorsChromSizesDict, pChro
                 msg += "Chromatin factors in folder {:s} - Chrom {:s} - Length {:s}"
                 msg = msg.format(fFolder, fullChromName_factor1, chromLengthFactors)
                 raise SystemExit(msg)
+        pFactorsDict[fFolder]["matrixName"] = mName
+        pMatricesDict[mName]["chromatinFolder"] = fFolder
+
+def loadMatricesPerChrom(pMatricesDict, pScaleMatrix, pWindowsize, pDistanceCorrection=False):
+    #load relevant parts of Hi-C matrices
+    for mName in pMatricesDict:
+        dataDict = dict()
+        for chromname in pMatricesDict[mName]["chromsizes"]:
+            sparseHiCMatrix, binSizeInt = getMatrixFromCooler(mName,chromname)
+            if sparseHiCMatrix is None:
+                msg = "Could not read Hi-C matrix {:s} for training, check inputs"
+                msg = msg.format(mName)
+                raise SystemExit(msg)
+            if pScaleMatrix: #scale matrix to 0..1, if requested
+                sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)
+            #matrix distance normalization, divide values in each side diagonal by their average
+            ##possible and even quite fast, but doesn't look reasonable
+            if pDistanceCorrection:
+                sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, pWindowsize)
+            dataDict[chromname] = sparseHiCMatrix
+            pMatricesDict[mName]["binsize"] = binSizeInt #is the same for all chroms anyway
+        pMatricesDict[mName]["data"] = dataDict
+        msg = "Cooler matrix {:s} loaded.\nBin size (resolution) is {:d}bp.\n"
+        msg = msg.format(mName, pMatricesDict[mName]["binsize"])
+        chromList = [name for name in pMatricesDict[mName]["chromsizes"]]
+        chromSizeList = [size for size in [pMatricesDict[mName]["chromsizes"][name] for name in chromList]]
+        matShapeList = [mat.shape for mat in [pMatricesDict[mName]["data"][name] for name in chromList]]
+        minList = [mat.min() for mat in [pMatricesDict[mName]["data"][name] for name in chromList]]
+        maxList = [mat.max() for mat in [pMatricesDict[mName]["data"][name] for name in chromList]]
+        shapeMsg = []
+        for name, size, shapeTuple, minVal, maxVal in zip(chromList, chromSizeList, matShapeList, minList, maxList):
+            s = "Chromosome: {:s} - Length {:d} - Matrix shape ({:s}) - min. {:.1f} - max. {:.1f}"
+            s = s.format(str(name), size, ", ".join(str(s) for s in shapeTuple), minVal, maxVal)
+            shapeMsg.append(s)
+        msg += "\n".join(shapeMsg)
+        print(msg)
+
+def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
+    modeltypeStr = pModelTypeStr
+    if pModelTypeStr == "sequence" and pSequenceFile is None:
+        msg = "Aborting. Cannot use model type >sequence< without providing a sequence file (-sf option)"
+        raise SystemExit(msg)
+    if pModelTypeStr != "sequence" and pSequenceFile is not None:
+        modeltypeStr = "sequence"
+        msg = "Sequence file provided, but model type >sequence< not selected.\n" 
+        msg += "Changed model type to >sequence<"
+        print(msg)
+    return modeltypeStr
+
+def loadChromatinFactorDataPerMatrix(pMatricesDict,pChromFactorsDict,pChromosomes):
+    #note the name of the corresponding matrices in the chromFactor dictionary
+    for fFolder, mName in zip(pChromFactorsDict,pMatricesDict):
+        bigwigFileList = [os.path.basename(x) for x in utils.getBigwigFileList(fFolder)] #ensures sorted order of files
+        binsize = pMatricesDict[mName]["binsize"]
+        dataPerChromDict = dict()
+        for chrom in pChromosomes:
+            chromName_matrix = pMatricesDict[mName]["namePrefix"] + chrom
+            chromLength_bins = pMatricesDict[mName]["data"][chromName_matrix].shape[0]
+            binnedChromFactorArray = np.empty(shape=(len(bigwigFileList),chromLength_bins))
+            for i, bigwigFile in enumerate(bigwigFileList):
+                chromName_bigwig = pChromFactorsDict[fFolder]["bigwigs"][bigwigFile]["namePrefix"] + chrom
+                binnedFactor = utils.binChromatinFactor(fFolder+bigwigFile, binsize, chromName_bigwig)
+                binnedChromFactorArray[i] = binnedFactor
+            dataPerChromDict[chromName_matrix] = np.transpose(binnedChromFactorArray) #use matrix chrom name for easier access later on        
+        pChromFactorsDict[fFolder]["data"] = dataPerChromDict
+
+def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
+    if pSequenceFile is None:
+        return
+    try:
+        records = SeqIO.index(pSequenceFile, format="fasta")
+    except Exception as e:
+        print(e)
+        msg = "Could not read sequence file. Wrong format?"
+        raise SystemExit(msg)
+    #find number of symbols in DNA (usually A,C,G,T and possibly N)
+    symbolList = []
+    for record in records:
+        seqStr = records[record].seq.upper()
+        symbolList.extend(set(list(seqStr)))
+    del seqStr
+    #check if all chromosomes are in the sequence file
+    #and if they have the appropriate length
+    seqIdList = list(records)
+    for mName in pMatrixDict:
+        seqIdDict = dict()
+        chromNameList = list(pMatrixDict[mName]["chromsizes"].keys())
+        for chrom in chromNameList:
+            if chrom in seqIdList:
+                seqIdDict[chrom] = chrom
+            elif "chr" + chrom in seqIdList:
+                seqIdDict[chrom] = "chr" + chrom
+            else:
+                msg = "Aborting. Chromsome {:s} is missing in sequence file {:s}"
+                msg = msg.format(chrom, pSequenceFile)
+                raise SystemExit(msg)
+            #length check
+            chromLengthSequence = len(records[ seqIdDict[chrom] ])
+            chromLengthMatrix = pMatrixDict[mName]["chromsizes"][chrom]
+            if chromLengthSequence != chromLengthMatrix:
+                msg = "Aborting. Chromosome {:s} in sequence file {:s} has bad length\n"
+                msg += "Matrix and chrom. factors: {:d} - Sequence File {:d}"    
+                msg = msg.format(seqIdDict[chrom], pSequenceFile, chromLengthSequence, chromLengthMatrix)
+                raise SystemExit(msg)
+        pMatrixDict[mName]["seqID"] = seqIdDict
+        pMatrixDict[mName]["seqFile"] = pSequenceFile
+        folderName = pMatrixDict[mName]["chromatinFolder"]
+        pFactorsDict[folderName]["seqID"] = seqIdDict
+        pFactorsDict[folderName]["seqFile"] = pSequenceFile
+        #add number of symbols
+        pMatrixDict[mName]["seqSymbols"] = sorted(list(set(symbolList)))
+        pFactorsDict[folderName]["seqSymbols"] = sorted(list(set(symbolList)))   
+    records.close()
+
+
+
 
 if __name__ == "__main__":
     training() #pylint: disable=no-value-for-parameter

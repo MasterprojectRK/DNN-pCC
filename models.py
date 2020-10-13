@@ -109,16 +109,13 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 ##https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, sparseMatrix, chromatinFactorArray, encodedDNAarray, indices, batchsize, windowsize, binsize, shuffle=True):
-        self.sparseMatrix = sparseMatrix
-        self.chromatinFactorArray = chromatinFactorArray
-        self.encodedDNAarray = encodedDNAarray
-        self.indices = indices
+    def __init__(self, matrixDict, factorDict, batchsize, windowsize, shuffle=True):
+        self.matrixDict = matrixDict
+        self.factorDict = factorDict
         self.batchsize = batchsize
         self.windowsize = windowsize
-        self.binsize = binsize
         self.shuffle = shuffle
-        if self.sparseMatrix is None:
+        if self.matrixDict is None: #for predictions, no target data is available
             self.shuffle = False
         self.on_epoch_end()
 
