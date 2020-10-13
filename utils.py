@@ -19,40 +19,41 @@ def getBigwigFileList(pDirectory):
             retList.append(pDirectory + file)
     return retList
 
-def getChromLengthFromBigwig(pBigwigFileName, pChrom):
-    chromLength1 = None
-    chromLength2 = None
-    chromNameStr = str(pChrom)
+def getChromSizesFromBigwig(pBigwigFileName):
+    chromSizeDict = dict()
     try:
         bigwigFile = pyBigWig.open(pBigwigFileName)
-        properFileType = bigwigFile.isBigWig()
+        chromSizeDict = bigwigFile.chroms()
+        for entry in chromSizeDict:
+            chromSizeDict[entry] = int(chromSizeDict[entry])
     except Exception as e:
         print(e) 
-    if properFileType:
-        #try both naming variants
-        chromLength1 = bigwigFile.chroms(chromNameStr)
-        chromLength2 = bigwigFile.chroms("chr" + chromNameStr)
-    if chromLength1 is None and chromLength2 is None:
-        return None  #non-existent chromosome
-    elif chromLength1 is not None:
-        return int(chromLength1)
-    else:
-        return int(chromLength2) 
+    return chromSizeDict
+         
 
 def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
     #returns sparse matrix from cooler file for given chromosome name
     sparseMatrix = None
     binSizeInt = 0
-    chromSizeInt = 0
     try:
         coolerMatrix = cooler.Cooler(pCoolerFilePath)
         sparseMatrix = coolerMatrix.matrix(sparse=True,balance=False).fetch(pChromNameStr)
+        sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
         binSizeInt = coolerMatrix.binsize
-        chromSizeInt = coolerMatrix.chromsizes[pChromNameStr]
     except Exception as e:
         print(e)
-    sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
-    return sparseMatrix, binSizeInt, chromSizeInt
+    return sparseMatrix, binSizeInt
+
+
+def getChromSizesFromCooler(pCoolerFilePath):
+    chromSizes = dict()
+    try:
+        coolerMatrix = cooler.Cooler(pCoolerFilePath) 
+        chromSizes = coolerMatrix.chromsizes.to_dict()
+    except Exception as e:
+        print(e)
+    return chromSizes
+
 
 def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
     #bin chromatin factor loaded from bigwig file pBigwigFileName with bin size pBinSizeInt for chromosome pChromStr
