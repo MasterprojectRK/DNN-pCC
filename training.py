@@ -141,8 +141,8 @@ def training(trainmatrices,
     loadChromatinFactorDataPerMatrix(trainMatricesDict,trainChromFactorsDict, trainChromNameList)
     loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
     
-    #check if DNA sequences for all chroms are there and correspond wit matrices/chromatin factors
-    #do not load them in memory yet, only store paths and ids in the dicts
+    #check if DNA sequences for all chroms are there and correspond with matrices/chromatin factors
+    #do not load them in memory yet, only store paths and sequence ids in the dicts
     #the generator can then load sequence data as required
     getCheckSequences(trainMatricesDict,trainChromFactorsDict, sequencefile)
     getCheckSequences(validationMatricesDict, validationChromFactorsDict, sequencefile)
@@ -157,18 +157,16 @@ def training(trainmatrices,
                                                         factorDict=validationChromFactorsDict,
                                                         batchsize=batchsize,
                                                         windowsize=windowsize)
-
-    #get the number of symbols in the DNA sequence (usually 5 or 4)
-    nr_symbols = None
-    if encodedSequenceArray is not None:
-        nr_symbols = encodedSequenceArray.shape[1]
-    paramDict["nr_symbols"] = nr_symbols
+    #get the important parameters for the models
+    nr_factors = max([trainChromFactorsDict[folder]["nr_factors"] for folder in trainChromFactorsDict])
+    binsize = max([trainMatricesDict[mName]["binsize"] for mName in trainMatricesDict])
+    nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
 
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
-                                    pBinSizeInt=binSizeInt,
-                                    pNrFactors=nr_Factors,
+                                    pBinSizeInt=binsize,
+                                    pNrFactors=nr_factors,
                                     pNrSymbols=nr_symbols)
     kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
     model.compile(optimizer=kerasOptimizer, 
@@ -455,6 +453,14 @@ def loadChromatinFactorDataPerMatrix(pMatricesDict,pChromFactorsDict,pChromosome
 def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
     if pSequenceFile is None:
         return
+    #check if the binsize is the same for all matrices
+    #sequence-based models won't work otherwise and we can stop right here
+    #before loading any sequence
+    binSizeList = [pMatrixDict[mName]["binsize"] for mName in pMatrixDict]
+    if len(set(binSizeList)) > 1:
+        msg = "Aborting. Bin size must be equal for all matrices\n"
+        msg += "Current sizes: " + ", ".join(str(x) for x in binSizeList)
+        raise SystemExit(msg)
     try:
         records = SeqIO.index(pSequenceFile, format="fasta")
     except Exception as e:

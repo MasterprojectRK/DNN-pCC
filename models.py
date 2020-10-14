@@ -115,48 +115,76 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
+        self.chromNames = []
+        #get the chrom names
+        for folder in self.factorDict:
+            self.chromNames.extend([name for name in self.factorDict[folder]["data"]])
+        self.chromNames = sorted(list(set(self.chromNames)))     
+        #indexing
+        #the idea is that data is provided chromosome-wise, then folder/matrix-wise
+        #each folder/matrix - chromosome pair has its own local index
+        #additionally, there is a mapping from the global index which
+        #tells us from which folder/matrix - chromosome pair a sample has to be taken from
+        #e.g. global sample number n is to be taken from folder/matrix k, chromosome c
+        self.localIndices = dict() #local indices
+        self.globalIndexMapping = dict() #mapping from global indices to local indices (chromosome, chromatin files)
+        globalIndex = 0
+        for chromName in self.chromNames:
+            folderIndDict = dict()
+            for folder in self.factorDict:
+                actDataLength = self.factorDict[folder]["data"][chromName].shape[0]
+                nr_samples = actDataLength - 3*windowsize + 1
+                folderIndDict[folder] = np.arange(nr_samples)
+                globalIndex += nr_samples - 1
+                self.globalIndexMapping[globalIndex] = [chromName, folder]
+            self.localIndices[chromName] = folderIndDict
+        self.globalIndex = np.arange(max([x for x in self.globalIndexMapping]))
+        
         if self.matrixDict is None: #for predictions, no target data is available
             self.shuffle = False
         self.on_epoch_end()
 
     def __len__(self):
-        return int(np.ceil(len(self.indices)  / self.batchsize))
+        #some batches will come from two matrices/folders or two chromosomes
+        #the last batch will have a different size
+        return np.ceil(len(self.globalIndex) / self.batchsize)
 
     def __getitem__(self, index):
-        indices = self.indices[index*self.batchsize : (index+1)*self.batchsize]
+        indices = self.globalIndex[index*self.batchsize : (index+1)*self.batchsize]
         return self.__generateData(indices)
 
     def __generateData(self, indices):
-        factorArray = np.empty((len(indices), 3*self.windowsize, self.chromatinFactorArray.shape[1]))
-        matrixArray = None
-        if self.sparseMatrix is not None:
-            matrixArray = np.empty((len(indices), int(self.windowsize*(self.windowsize + 1)/2)))
-        seqArray = None
-        if self.encodedDNAarray is not None:
-            seqArray = np.empty((len(indices),self.windowsize*self.binsize, self.encodedDNAarray.shape[1]), dtype="uint8")
-        for b,i in enumerate(indices):
-            if self.sparseMatrix is not None:
-                #first matrix has a windowsize offset from start of chromosome (boundary handling)
-                j = i + self.windowsize
-                k = j + self.windowsize
-                trainmatrix = self.sparseMatrix[j:k,j:k].todense()[np.triu_indices(self.windowsize)]
-                matrixArray[b] = np.nan_to_num(trainmatrix)
-            #the chromatin factors have no offset
-            factorArray[b] = self.chromatinFactorArray[i:i+3*self.windowsize,:]
-            if self.encodedDNAarray is not None:
-                #take just the sequence under the current matrix to save memory
-                j = i + self.windowsize*self.binsize
-                k = j + self.windowsize*self.binsize
-                seqArray[b] = self.encodedDNAarray[j:k,:]
-        if self.sparseMatrix is not None and self.encodedDNAarray is not None:
-            return [factorArray, seqArray], matrixArray
-        elif self.sparseMatrix is not None and self.encodedDNAarray is None:
-            return [factorArray], matrixArray
-        elif self.sparseMatrix is None and self.encodedDNAarray is not None: #prediction from factors and sequence
-            return [factorArray, seqArray]
-        else: #matrix and sequence array are none (prediction from factors only)
-            return factorArray
+        pass
+        # factorArray = np.empty((len(indices), 3*self.windowsize, self.chromatinFactorArray.shape[1]))
+        # matrixArray = None
+        # if self.sparseMatrix is not None:
+        #     matrixArray = np.empty((len(indices), int(self.windowsize*(self.windowsize + 1)/2)))
+        # seqArray = None
+        # if self.encodedDNAarray is not None:
+        #     seqArray = np.empty((len(indices),self.windowsize*self.binsize, self.encodedDNAarray.shape[1]), dtype="uint8")
+        # for b,i in enumerate(indices):
+        #     if self.sparseMatrix is not None:
+        #         #first matrix has a windowsize offset from start of chromosome (boundary handling)
+        #         j = i + self.windowsize
+        #         k = j + self.windowsize
+        #         trainmatrix = self.sparseMatrix[j:k,j:k].todense()[np.triu_indices(self.windowsize)]
+        #         matrixArray[b] = np.nan_to_num(trainmatrix)
+        #     #the chromatin factors have no offset
+        #     factorArray[b] = self.chromatinFactorArray[i:i+3*self.windowsize,:]
+        #     if self.encodedDNAarray is not None:
+        #         #take just the sequence under the current matrix to save memory
+        #         j = i + self.windowsize*self.binsize
+        #         k = j + self.windowsize*self.binsize
+        #         seqArray[b] = self.encodedDNAarray[j:k,:]
+        # if self.sparseMatrix is not None and self.encodedDNAarray is not None:
+        #     return [factorArray, seqArray], matrixArray
+        # elif self.sparseMatrix is not None and self.encodedDNAarray is None:
+        #     return [factorArray], matrixArray
+        # elif self.sparseMatrix is None and self.encodedDNAarray is not None: #prediction from factors and sequence
+        #     return [factorArray, seqArray]
+        # else: #matrix and sequence array are none (prediction from factors only)
+        #     return factorArray
 
     def on_epoch_end(self):
         if self.shuffle == True:
-            np.random.shuffle(self.indices) #in-place permutation
+            pass #in-place permutation of local indices
