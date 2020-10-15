@@ -80,12 +80,12 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
         if nr_inf != 0 or nr_nan != 0:
             binArray = np.nan_to_num(binArray, nan=0.0, posinf=np.nanmax(binArray[binArray != np.inf]),neginf=0.0)
         if nr_inf != 0:
-            msg_inf = "Warning: replaced {:d} infinity values in chromatin factor data by 0/max. numeric value in data"
-            msg_inf = msg_inf.format(nr_inf)
+            msg_inf = "Warning: replaced {:d} infinity values in {:s} by 0/max. numeric value in data"
+            msg_inf = msg_inf.format(nr_inf, pBigwigFileName)
             print(msg_inf)
         if nr_nan != 0:
-            msg_nan = "Warning: replaced {:d} NANs in chromatin factor data by 0."
-            msg_nan = msg_nan.format(nr_nan)
+            msg_nan = "Warning: replaced {:d} NANs in {:s} by 0."
+            msg_nan = msg_nan.format(nr_nan, pBigwigFileName)
             print(msg_nan)
     return binArray
 

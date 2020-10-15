@@ -131,14 +131,18 @@ def training(trainmatrices,
 
     #load sparse Hi-C matrices per chromosome
     #scale and normalize, if requested
+    print("Loading Training matrix/matrices")
     loadMatricesPerChrom(trainMatricesDict, scalematrix, windowsize)
+    print("Loading Validation matrix/matrices")
     loadMatricesPerChrom(validationMatricesDict, scalematrix, windowsize)
 
     #load, bin and aggregate the chromatin factors into a numpy array
     #of size #matrix_size_in_bins x nr_chromatin_factors
     #loading is per corresponding training matrix (per folder)
     #and the bin sizes also correspond to the matrices
+    print("Loading Chromatin factors for training")
     loadChromatinFactorDataPerMatrix(trainMatricesDict,trainChromFactorsDict, trainChromNameList)
+    print("Loading Chromatin factors for validation")
     loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
     
     #check if DNA sequences for all chroms are there and correspond with matrices/chromatin factors
@@ -152,7 +156,8 @@ def training(trainmatrices,
     trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
                                                         factorDict=trainChromFactorsDict,
                                                         batchsize=batchsize,
-                                                        windowsize=windowsize)
+                                                        windowsize=windowsize,
+                                                        shuffle=True)
     validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
                                                         factorDict=validationChromFactorsDict,
                                                         batchsize=batchsize,
@@ -160,7 +165,9 @@ def training(trainmatrices,
     #get the important parameters for the models
     nr_factors = max([trainChromFactorsDict[folder]["nr_factors"] for folder in trainChromFactorsDict])
     binsize = max([trainMatricesDict[mName]["binsize"] for mName in trainMatricesDict])
-    nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
+    nr_symbols = None
+    if sequencefile is not None:
+        nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
 
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
@@ -175,7 +182,7 @@ def training(trainmatrices,
 
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = int(np.ceil(len(trainIndices)/batchsize) * 20)
+    saveFreqInt = len(trainDataGenerator) * 20 #every twenty batches
     checkpointFilename = outputpath + "checkpoint_{epoch:05d}.h5"
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
@@ -197,8 +204,14 @@ def training(trainmatrices,
     #plot the model
     tf.keras.utils.plot_model(model,show_shapes=True, to_file=outputpath + "model.png")
     
+    #don't shuffle when sequencefile present
+    #to avoid reloading sequences
+    shuffle = (sequencefile is None)
+    #shuffle = False
+
     #train the neural network
     history = model.fit(trainDataGenerator,
+              shuffle=shuffle,
               epochs= numberepochs,
               validation_data= validationDataGenerator,
               callbacks=[tensorboardCallback,
@@ -214,34 +227,12 @@ def training(trainmatrices,
     lossPlotFilename = outputpath + "lossOverEpochs.png"
     utils.plotLoss(history, lossPlotFilename)
 
-    #self-prediction just for testing
-    # input_test = np.expand_dims(chromatinFactorArray[0,:,:,:],0)
-    # target_test = np.expand_dims(matrixArray[0,:],0)
-    # loss = model.evaluate(x=input_test, y=target_test)
-    # print("loss: {:.3f}".format(loss))
-    # pred = model.predict(x=input_test)
-    # predMatrix = np.zeros(shape=(windowsize,windowsize))
-    # predMatrix[np.triu_indices(windowsize)] = pred[0] 
-    # utils.plotMatrix(predMatrix *1000, outputpath + "predMatrix.png", "pred. matrix")
-    # targetMatrix = np.zeros(shape=(windowsize,windowsize))
-    # targetMatrix[np.triu_indices(windowsize)] = matrixArray[0]
-    # utils.plotMatrix(targetMatrix *1000, outputpath + "targetMatrix.png", "target matrix" )
-
-    # pearson_r, pearson_p = pearsonr(matrixArray[0],pred[0])
-    # msg = "Pearson R = {:.3f}, Pearson p = {:.3f}"
-    # msg = msg.format(pearson_r, pearson_p)
-    # print(msg)
-
-    # mse = (np.square(matrixArray[0] - pred[0])).mean(axis=None)
-    # print("MSE", mse)
-
 def checkGetChromsPresentInMatrices(pTrainmatrices, pChromNameList):
     matrixDict = dict()
     #get the chrom names and sizes present in the matrices
     for matrixName in pTrainmatrices:
         tmpMatDict = dict()
         tmpSizeDict = utils.getChromSizesFromCooler(matrixName)
-        print(tmpSizeDict)
         if len(tmpSizeDict) == 0:
             msg = "Aborting. No chromosomes found in matrix {:s}"
             msg = msg.format(matrixName)
@@ -436,10 +427,13 @@ def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
 def loadChromatinFactorDataPerMatrix(pMatricesDict,pChromFactorsDict,pChromosomes):
     #note the name of the corresponding matrices in the chromFactor dictionary
     for fFolder, mName in zip(pChromFactorsDict,pMatricesDict):
+        msg = "Binning chromatin factors (bigwigs) in folder {:s}".format(fFolder)
+        print(msg)
         bigwigFileList = [os.path.basename(x) for x in utils.getBigwigFileList(fFolder)] #ensures sorted order of files
         binsize = pMatricesDict[mName]["binsize"]
         dataPerChromDict = dict()
         for chrom in pChromosomes:
+            print("Chromosome", chrom)
             chromName_matrix = pMatricesDict[mName]["namePrefix"] + chrom
             chromLength_bins = pMatricesDict[mName]["data"][chromName_matrix].shape[0]
             binnedChromFactorArray = np.empty(shape=(len(bigwigFileList),chromLength_bins))
@@ -505,9 +499,6 @@ def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
         pMatrixDict[mName]["seqSymbols"] = sorted(list(set(symbolList)))
         pFactorsDict[folderName]["seqSymbols"] = sorted(list(set(symbolList)))   
     records.close()
-
-
-
 
 if __name__ == "__main__":
     training() #pylint: disable=no-value-for-parameter

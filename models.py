@@ -105,8 +105,6 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
     finalModel = Model(inputs=[model1.input, model2.input], outputs=x)
     return finalModel
 
-##the following class is an adapted version from a tutorial at Stanford University
-##https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
     def __init__(self, matrixDict, factorDict, batchsize, windowsize, shuffle=True):
@@ -115,76 +113,143 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
-        self.chromNames = []
+        self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
+        self.chromNames = []
         for folder in self.factorDict:
             self.chromNames.extend([name for name in self.factorDict[folder]["data"]])
         self.chromNames = sorted(list(set(self.chromNames)))     
-        #indexing
-        #the idea is that data is provided chromosome-wise, then folder/matrix-wise
-        #each folder/matrix - chromosome pair has its own local index
-        #additionally, there is a mapping from the global index which
-        #tells us from which folder/matrix - chromosome pair a sample has to be taken from
-        #e.g. global sample number n is to be taken from folder/matrix k, chromosome c
-        self.localIndices = dict() #local indices
-        self.globalIndexMapping = dict() #mapping from global indices to local indices (chromosome, chromatin files)
-        globalIndex = 0
-        for chromName in self.chromNames:
-            folderIndDict = dict()
-            for folder in self.factorDict:
-                actDataLength = self.factorDict[folder]["data"][chromName].shape[0]
-                nr_samples = actDataLength - 3*windowsize + 1
-                folderIndDict[folder] = np.arange(nr_samples)
-                globalIndex += nr_samples - 1
-                self.globalIndexMapping[globalIndex] = [chromName, folder]
-            self.localIndices[chromName] = folderIndDict
-        self.globalIndex = np.arange(max([x for x in self.globalIndexMapping]))
-        
-        if self.matrixDict is None: #for predictions, no target data is available
+        #index the samples provided in the dicts
+        self.localIndices, self.globalIndex, self.globalIndexMapping = self.__buildIndex()
+        #disable shuffling when no target data is available (i.e. for predictions)
+        if self.matrixDict is None: 
             self.shuffle = False
+        #initial shuffling of local indices
         self.on_epoch_end()
 
     def __len__(self):
         #some batches will come from two matrices/folders or two chromosomes
         #the last batch will have a different size
-        return np.ceil(len(self.globalIndex) / self.batchsize)
+        return int(np.ceil(len(self.globalIndex) / self.batchsize))
 
     def __getitem__(self, index):
         indices = self.globalIndex[index*self.batchsize : (index+1)*self.batchsize]
+        #print("\nind", indices)
         return self.__generateData(indices)
 
-    def __generateData(self, indices):
-        pass
-        # factorArray = np.empty((len(indices), 3*self.windowsize, self.chromatinFactorArray.shape[1]))
-        # matrixArray = None
-        # if self.sparseMatrix is not None:
-        #     matrixArray = np.empty((len(indices), int(self.windowsize*(self.windowsize + 1)/2)))
-        # seqArray = None
-        # if self.encodedDNAarray is not None:
-        #     seqArray = np.empty((len(indices),self.windowsize*self.binsize, self.encodedDNAarray.shape[1]), dtype="uint8")
-        # for b,i in enumerate(indices):
-        #     if self.sparseMatrix is not None:
-        #         #first matrix has a windowsize offset from start of chromosome (boundary handling)
-        #         j = i + self.windowsize
-        #         k = j + self.windowsize
-        #         trainmatrix = self.sparseMatrix[j:k,j:k].todense()[np.triu_indices(self.windowsize)]
-        #         matrixArray[b] = np.nan_to_num(trainmatrix)
-        #     #the chromatin factors have no offset
-        #     factorArray[b] = self.chromatinFactorArray[i:i+3*self.windowsize,:]
-        #     if self.encodedDNAarray is not None:
-        #         #take just the sequence under the current matrix to save memory
-        #         j = i + self.windowsize*self.binsize
-        #         k = j + self.windowsize*self.binsize
-        #         seqArray[b] = self.encodedDNAarray[j:k,:]
-        # if self.sparseMatrix is not None and self.encodedDNAarray is not None:
-        #     return [factorArray, seqArray], matrixArray
-        # elif self.sparseMatrix is not None and self.encodedDNAarray is None:
-        #     return [factorArray], matrixArray
-        # elif self.sparseMatrix is None and self.encodedDNAarray is not None: #prediction from factors and sequence
-        #     return [factorArray, seqArray]
-        # else: #matrix and sequence array are none (prediction from factors only)
-        #     return factorArray
+    def __generateData(self, globalIndices):
+        #initialize the return arrays
+        #len(globalIndices) is generally equal to batchsize
+        #but the last batch may be smaller
+        chromatinFactorArray = np.empty((len(globalIndices), 3*self.windowsize, self.nr_factors))
+        matrixArray = None
+        if self.matrixDict is not None:
+            matrixArray = np.empty((len(globalIndices), int(self.windowsize*(self.windowsize + 1)/2)))
+        #find the correct global -> local mapping for of the first and last global index in the batch
+        indBreakpoints = [bp for bp in self.globalIndexMapping]
+        lowerMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[0])
+        upperMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[-1])
+        if lowerMapInd == upperMapInd:
+            #all global Indices belong to samples from the same chrom / folder
+            localAccessInds = globalIndices.copy() #avoid side effects on globalIndices
+            if lowerMapInd > 0:
+                localAccessInds -= indBreakpoints[lowerMapInd - 1]
+            currentChrom = self.globalIndexMapping[indBreakpoints[lowerMapInd]][0]
+            currentFolder = self.globalIndexMapping[indBreakpoints[lowerMapInd]][1]
+            localIndices = self.localIndices[currentChrom][currentFolder][localAccessInds]
+            #now get the data
+            for b, ind in enumerate(localIndices):
+                chromatinFactorArray[b] = self.__getFactorData(currentFolder,currentChrom,ind)
+                if matrixArray is not None:
+                    mName = self.factorDict[currentFolder]["matrixName"]
+                    matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
+            #print("\ngbi", globalIndices)
+            #print("locAccInd", localAccessInds)
+            #print("localInd" ,localIndices)
+            #print("chrom", currentChrom, "folder", currentFolder)
+        else:
+            #some samples are from one chrom/folder pair and the others from another one 
+            #split the access indices into lower and upper part
+            indSplit = next(ind for ind,val in enumerate(globalIndices) if val > indBreakpoints[lowerMapInd])
+            localAccessIndsLower = globalIndices.copy()[:indSplit-1] #avoid side effects on globalIndices
+            if lowerMapInd > 0:
+                localAccessIndsLower -= indBreakpoints[lowerMapInd - 1]
+            localAccessIndsUpper = globalIndices[indSplit-1:] - indBreakpoints[upperMapInd - 1]
+            currentChromLower = self.globalIndexMapping[indBreakpoints[lowerMapInd]][0]
+            currentFolderLower = self.globalIndexMapping[indBreakpoints[lowerMapInd]][1]
+            currentChromUpper = self.globalIndexMapping[indBreakpoints[upperMapInd]][0]
+            currentFolderUpper = self.globalIndexMapping[indBreakpoints[upperMapInd]][1]
+            #print("\nchrom lower", currentChromLower, "chrom upper", currentChromUpper)
+            #print("\nfolder lower", currentFolderLower, "folder upper", currentFolderUpper)
+            #print("\nsplit lower", localAccessIndsLower, "split upper", localAccessIndsUpper)
+            #print("gbi", globalIndices)
+            localIndicesLower = self.localIndices[currentChromLower][currentFolderLower][localAccessIndsLower]
+            localIndicesUpper = self.localIndices[currentChromUpper][currentFolderUpper][localAccessIndsUpper]
+            #now load the data
+            for b, ind in enumerate(localIndicesLower):
+                chromatinFactorArray[b] = self.__getFactorData(currentFolderLower,currentChromLower,ind)
+                if matrixArray is not None:
+                    mName = self.factorDict[currentFolderLower]["matrixName"]
+                    matrixArray[b] = self.__getMatrixData(mName,currentChromLower, ind)
+            indOffset = len(localIndicesLower)
+            for b, ind in enumerate(localIndicesUpper):
+                chromatinFactorArray[b+indOffset] = self.__getFactorData(currentFolderUpper, currentChromUpper, ind)
+                if matrixArray is not None:
+                    mName = self.factorDict[currentFolderUpper]["matrixName"]
+                    matrixArray[b+indOffset] = self.__getMatrixData(mName,currentChromUpper, ind)
+        if matrixArray is not None:
+            return [chromatinFactorArray], matrixArray
+        else:
+            return matrixArray
 
     def on_epoch_end(self):
         if self.shuffle == True:
-            pass #in-place permutation of local indices
+            #permutation of local indices
+            for chromname in self.chromNames:
+                for folder in self.localIndices[chromname]:
+                    np.random.shuffle(self.localIndices[chromname][folder])
+            
+
+    
+    def __buildIndex(self):
+        #indexing of samples
+        #the idea is that data is provided chromosome-wise, then folder/matrix-wise
+        #i.e. chr1 - folder1, folder2,... chr2, folder 1, folder 2
+        #because the matrices and sequences are structured in chromosomes
+        #each folder/matrix - chromosome pair has its own local index
+        #this allows keeping the global index linearly increasing while shuffling local indices.
+        #There is a mapping from the global index which
+        #tells us from which folder/matrix - chromosome pair a sample has to be taken from
+        #e.g. global sample number n is to be taken from folder/matrix k, chromosome c
+        localIndices = dict() #for each chromosome/folder pair
+        globalIndexMapping = dict() #mapping from global indices to local indices (chromosome/folder pairs)
+        globalIndex = 0
+        for chromName in self.chromNames:
+            folderIndDict = dict()
+            for folder in self.factorDict:
+                actDataLength = self.factorDict[folder]["data"][chromName].shape[0]
+                nr_samples = actDataLength - 3*self.windowsize + 1
+                folderIndDict[folder] = np.arange(nr_samples)
+                globalIndex += nr_samples
+                globalIndexMapping[globalIndex] = [chromName, folder]
+                #this means that all samples with global index [0...$globalIndex) 
+                #are taken from chromosome $chromName, bigwig folder $folder
+                #and so on for higher indices
+            localIndices[chromName] = folderIndDict
+        globalIndex = np.arange(max([x for x in globalIndexMapping]))
+        return localIndices, globalIndex, globalIndexMapping
+
+    def __getMatrixData(self, mName, chromName, idx):
+        if self.matrixDict is None:
+            return None
+        #the 0-th matrix starts a windowsize away from the boundary
+        startInd = idx + self.windowsize
+        stopInd = startInd + self.windowsize
+        trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(self.windowsize)]
+        trainmatrix = np.nan_to_num(trainmatrix)
+        return trainmatrix
+
+    def __getFactorData(self, folder, chromName, idx):
+        startInd = idx
+        stopInd = startInd + 3*self.windowsize
+        return self.factorDict[folder]["data"][chromName][startInd:stopInd,:]
