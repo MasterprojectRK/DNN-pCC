@@ -200,7 +200,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         if matrixArray is not None:
             return [chromatinFactorArray], matrixArray
         else:
-            return matrixArray
+            return chromatinFactorArray
 
     def on_epoch_end(self):
         if self.shuffle == True:

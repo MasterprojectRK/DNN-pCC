@@ -6,6 +6,7 @@ import numpy as np
 import csv
 import ast
 import os
+from scipy import sparse
 
 
 @click.option("--validationmatrix","-vm", required=False,
@@ -42,6 +43,8 @@ def prediction(validationmatrix,
                 multiplier,
                 trainparamfile):
     
+    predParamDict = locals().copy()
+
     #load the trained model
     try:
         trainedModel = tf.keras.models.load_model(trainedmodel)
@@ -63,99 +66,75 @@ def prediction(validationmatrix,
         raise SystemExit(msg)
     try:
         windowsize = int(trainParamDict["windowsize"])
-        binSizeInt = int(trainParamDict["binSize"])
+        binSizeInt = int(trainParamDict["binsize"])
         batchSizeInt = int(trainParamDict["batchsize"])
         clampfactors = bool(trainParamDict["clampfactors"])
         scalefactors = bool(trainParamDict["scalefactors"])
+        scalematrix = bool(trainParamDict["scalematrix"])
         modelType = str(trainParamDict["modeltype"])
-        trainmatshape = ast.literal_eval(trainParamDict["train_matrix_shape"])
-        nr_Factors = int(trainParamDict["nr_Factors"])
-        factorNameList = [os.path.basename(trainParamDict["chromFactor_" + str(i)]) for i in range(nr_Factors)]
+        nr_Factors = int(trainParamDict["nr_factors"])
+        factorNameSet = set([os.path.basename(trainParamDict["chromFactor_" + str(i)]) for i in range(nr_Factors)])
     except Exception as e:
         msg = "Aborting. Parameter not in param file or wrong data type:\n{:s}"
         msg = msg.format(str(e))
         raise SystemExit(msg)
 
-    
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
         raise SystemExit(msg)
 
-    #load chromatin files first
+    #extract chromosome name and size from the input
+    chromNameList = chromosome.rstrip().split(" ")  
+    chromNameList = [x.lstrip("chr") for x in chromNameList]
+    if len(chromNameList) != 1:
+        msg = "Predicting/Testing on more than one chromosome currently not supported"
+        raise SystemExit(msg)
+
+    #check chromatin files first
     #if there are too few or too much, 
     #we can already stop here.
-    bigwigFileList = utils.getBigwigFileList(chromatinpath)
-    if len(bigwigFileList) != nr_Factors:
-        msg = "Aborting.\n"
-        msg += "Did not find the required number of bigwig files in {:s}\n"
-        msg += "Required: {:d}, Found: {:d}"
-        msg = msg.format(chromatinpath, nr_Factors, len(bigwigFileList))
+    chromFactorsDict = utils.checkGetChromsPresentInFactors([chromatinpath],chromNameList)
+    if chromFactorsDict[chromatinpath]["nr_factors"] != nr_Factors:
+        msg = "Too few or too many chromatin factors\n"
+        msg += "Folder {:s} - {:d}\n"
+        msg += "Trained model - {:d}"
+        msg = msg.format(chromatinpath,chromFactorsDict[chromatinpath]["nr_factors"],nr_Factors)
         raise SystemExit(msg)
-    msg = "Found {:d} chromatin factors in {:s}."
-    msg = msg.format(len(bigwigFileList),chromatinpath)
-    print(msg)
-    for i, factor in enumerate(bigwigFileList):
-        print(factor)
-        if os.path.basename(factor) != factorNameList[i]:
-            msg = "Warning: Chromatin factor with different name.\n"
-            msg += "Training: {:s}; Prediction: {:s}"
-            msg = msg.format(factorNameList[i], factor)
-            print (msg)
-    
-    #get the chrom length for all files and check if it is the same
-    chromLengthList = [utils.getChromLengthFromBigwig(fn, chromosome) for fn in bigwigFileList]
-    if min(chromLengthList) != max(chromLengthList):
-        msg = "Warning: Chromosome lengths are not equal in bigwig files\n"
-        msg += "Recorded lengths: "
-        msg += ", ".join(str(l) for l in chromLengthList) + "\n"
-        msg += "Using the max. value"
-        print(msg)
-    chromLength_bins = int(np.ceil( max(chromLengthList)/binSizeInt ))
-    if chromLength_bins != trainmatshape[0]:
-        msg = "Info: chrom length and train matrix shape differ\n"
-        msg += "This is normal when predicting for a different chromosome.\n"
-        msg += "But apart from that, it should not happen"
-        print(msg)
+    factorsInFolderSet = set([bigwigfile for bigwigfile in chromFactorsDict[chromatinpath]["bigwigs"]])
+    factorsDiff1 = factorNameSet - factorsInFolderSet
+    factorsDiff2 = factorsInFolderSet - factorNameSet
+    if len(factorsDiff1) > 0 or len(factorsDiff2) > 0:
+        msg = "Aborting. Different chromatin factor (bigwig-)filenames\n"
+        if len(factorsDiff1) > 0:
+            msg += "The following factors were in the training set, but are not in the folder {:s}\n"
+            msg = msg.format(chromatinpath)
+            msg += ", ".join(list(factorsDiff1))
+        if len(factorsDiff2) > 0:
+            msg += "The following factors are in the folder {:s}, but were not in the training set\n"
+            msg = msg.format(chromatinpath)
+            msg += ", ".join(list(factorsDiff2))
+        raise SystemExit(msg)
+ 
+    if validationmatrix is not None:
+        #load matrix for evaluating the predictions, if present 
+        matricesDict = utils.checkGetChromsPresentInMatrices([validationmatrix],chromNameList)
+        utils.checkChromSizesMatching(matricesDict,chromFactorsDict,chromNameList)
+        utils.loadMatricesPerChrom(matricesDict,scalematrix,windowsize)
+    else:
+        #otherwise use a dummy dictionary so that the utils functions can be used
+        matricesDict = buildDummyMatrixDict(chromatinpath,chromNameList,binSizeInt,chromFactorsDict)
+
+    #load chromatin factor data
+    utils.loadChromatinFactorDataPerMatrix(matricesDict,chromFactorsDict,chromNameList,scalefactors,clampfactors)
 
     #read the DNA sequence and do a one-hot encoding
-    encodedSequenceArray = None
-    if sequencefile is not None:
-        encodedSequenceArray = utils.buildSequenceArray(sequencefile,binSizeInt)
-
-    #now load relevant part of Hi-C matrix, if provided,
-    #since the bin size will be taken from there
-    if validationmatrix is not None:
-        sparseHiCMatrix, binSizeInt2, chromLengthInt = utils.getMatrixFromCooler(validationmatrix,chromosome)
-        del(chromLengthInt)
-        if sparseHiCMatrix is None:
-            msg = "Could not read HiC matrix {:s} for training, check inputs"
-            msg = msg.format(validationmatrix)
-            raise SystemExit(msg)
-        msg = "Cooler matrix {:s} loaded.\nBin size (resolution) is {:d}bp."
-        msg = msg.format(validationmatrix, binSizeInt2)
-        print(msg)
-        print("matrix shape", sparseHiCMatrix.shape)
-        if binSizeInt != binSizeInt2:
-            msg = "Warning. Bin size in training file and parameter file do not match"
-            print(msg)
+    utils.getCheckSequences(matricesDict,chromFactorsDict, sequencefile)
     
-    #compose chromatin factors
-    chromatinFactorArray = utils.composeChromatinFactors(bigwigFileList,
-                                                           pChromLength_bins=chromLength_bins, 
-                                                           pBinSizeInt=binSizeInt,
-                                                           pChromosomeStr=chromosome,
-                                                           pClampArray=clampfactors,
-                                                           pScaleArray=scalefactors)
-
-    predIndices = np.arange(chromatinFactorArray.shape[0] - 3*windowsize + 1)
-    predictionDataGenerator = models.multiInputGenerator(sparseMatrix=None,
-                                                        chromatinFactorArray=chromatinFactorArray,
-                                                        encodedDNAarray=encodedSequenceArray, 
-                                                        indices=predIndices,
-                                                        batchsize=batchSizeInt,
-                                                        windowsize=windowsize, 
-                                                        binsize=binSizeInt, 
-                                                        shuffle=False)  
+    predictionDataGenerator = models.multiInputGenerator(matrixDict=None,
+                                                factorDict=chromFactorsDict,
+                                                batchsize=batchSizeInt,
+                                                windowsize=windowsize,
+                                                shuffle=False)  
 
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
@@ -172,19 +151,38 @@ def prediction(validationmatrix,
     #If target matrix provided, compute some figures 
     #to assess prediction quality
     if validationmatrix is not None:
-        evalGenerator = models.multiInputGenerator(sparseMatrix=sparseHiCMatrix,
-                                                  chromatinFactorArray=chromatinFactorArray,
-                                                  encodedDNAarray=encodedSequenceArray,
-                                                  indices=predIndices,
+        evalGenerator = models.multiInputGenerator(matrixDict=matricesDict,
+                                                  factorDict=chromFactorsDict,
                                                   batchsize=batchSizeInt,
                                                   windowsize=windowsize,
-                                                  binsize=binSizeInt,
                                                   shuffle=False)
         loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
 
     #store results
-        #to be implemented
+    parameterFile = outputpath + "predParams.csv"    
+    with open(parameterFile, "w") as csvfile:
+        dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(predParamDict.keys())))
+        dictWriter.writeheader()
+        dictWriter.writerow(predParamDict)
+
+
+
+def buildDummyMatrixDict(pChromPath, pChromNameList, pBinsize, pFactorDict):
+    firstBigwigFile = list(pFactorDict[pChromPath]["bigwigs"].keys())[0]
+    chromName = pFactorDict[pChromPath]["bigwigs"][firstBigwigFile]["namePrefix"] + pChromNameList[0]
+    chromSize = pFactorDict[pChromPath]["bigwigs"][firstBigwigFile]["chromsizes"][chromName]
+    chromSize = int(np.ceil(chromSize/pBinsize))
+    dummyDict = dict()
+    dummyDict["dummy"] = dict()
+    dummyDict["dummy"]["data"] = dict()
+    dummyDict["dummy"]["binsize"] = pBinsize
+    dummyDict["dummy"]["namePrefix"] = ""
+    dummyDict["dummy"]["data"][pChromNameList[0]] = sparse.csr_matrix((chromSize,chromSize),dtype=bool)
+    return dummyDict
+
+
+
 
 
 if __name__ == "__main__":
