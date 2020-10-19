@@ -79,6 +79,9 @@ tf.random.set_seed(35)
                 type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
                 default="MSE",
                 help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity")
+@click.option("--earlyStopping", "-early",
+                required=False, type=click.IntRange(min=5),
+                help="patience for early stopping, stop after this number of epochs w/o improvement")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -98,7 +101,8 @@ def training(trainmatrices,
             scalefactors,
             modeltype,
             optimizer,
-            loss):
+            loss,
+            earlystopping):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -234,10 +238,17 @@ def training(trainmatrices,
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
                                                         save_freq=saveFreqInt)
-    #earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
-    #                                                     min_delta=1e-3,
-    #                                                     patience=5,
-    #                                                     restore_best_weights=True)
+    earlyStoppingCallback = None
+    if earlystopping is not None:
+        earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
+                                                            patience=earlystopping,
+                                                            min_delta=0.001,
+                                                            restore_best_weights=True)
+    callback_fns = [tensorboardCallback,
+                checkpointCallback]
+    if earlystopping is not None:
+        callback_fns.append(earlyStoppingCallback)
+    
 
     #save the training parameters to a file before starting to train
     #(allows recovering the parameters even if training is aborted
@@ -261,10 +272,7 @@ def training(trainmatrices,
               shuffle=shuffle,
               epochs= numberepochs,
               validation_data= validationDataGenerator,
-              callbacks=[tensorboardCallback,
-                          checkpointCallback,
-                            #earlyStoppingCallback
-                           ]
+              callbacks=callback_fns
             )
 
     #store the trained network
