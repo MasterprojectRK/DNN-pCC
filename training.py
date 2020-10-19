@@ -71,6 +71,14 @@ tf.random.set_seed(35)
                 type=click.Choice(["initial", "current", "sequence"]),
                 default="current",
                 help="Type of model to use")
+@click.option("--optimizer", "-opt", required=False,
+                type=click.Choice(["SGD", "Adam", "RMSprop"]),
+                default="Adam",
+                help="Optimizer to use (SGD, Adam, RMSprop or cosine similarity)")
+@click.option("--loss", "-l", required=False,
+                type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
+                default="MSE",
+                help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -88,7 +96,9 @@ def training(trainmatrices,
             scalematrix,
             clampfactors,
             scalefactors,
-            modeltype):
+            modeltype,
+            optimizer,
+            loss):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -188,9 +198,33 @@ def training(trainmatrices,
                                     pBinSizeInt=binsize,
                                     pNrFactors=nr_factors,
                                     pNrSymbols=nr_symbols)
-    kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
+    #create optimizer
+    kerasOptimizer = None
+    if optimizer == "SGD":
+        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=learningrate)
+    elif optimizer == "Adam":
+        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
+    elif optimizer == "RMSprop":
+        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=learningrate)
+    else:
+        raise NotImplementedError("unknown optimizer")
+    #create loss
+    loss_fn = None
+    if loss == "MSE":
+        loss_fn = tf.keras.losses.MeanSquaredError()
+    elif loss == "MAE":
+        loss_fn = tf.keras.losses.MeanAbsoluteError()
+    elif loss == "MAPE":
+        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
+    elif loss == "MSLE":
+        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
+    elif loss == "Cosine":
+        loss_fn = tf.keras.losses.CosineSimilarity()
+    else:
+        raise NotImplementedError("unknown loss function")
+    #compile the model
     model.compile(optimizer=kerasOptimizer, 
-                 loss=tf.keras.losses.MeanSquaredError())
+                 loss=loss_fn)
     model.summary()
 
     #callbacks to check the progress etc.
