@@ -116,8 +116,9 @@ def plotMatrix(pMatrix, pFilename, pTitle):
     #test function to plot matrices
     #not for production use
     fig1, ax1 = plt.subplots()
-    ax1.matshow(pMatrix, cmap="Reds", norm=colors.LogNorm())
+    cs = ax1.matshow(pMatrix, cmap="RdYlBu_r", norm=colors.LogNorm())
     ax1.set_title(str(pTitle))
+    fig1.colorbar(cs)
     fig1.savefig(pFilename)
 
 def plotLoss(pKerasHistoryObject, pFilename):
