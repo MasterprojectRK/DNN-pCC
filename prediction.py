@@ -68,9 +68,9 @@ def prediction(validationmatrix,
         windowsize = int(trainParamDict["windowsize"])
         binSizeInt = int(trainParamDict["binsize"])
         batchSizeInt = int(trainParamDict["batchsize"])
-        clampfactors = bool(trainParamDict["clampfactors"])
-        scalefactors = bool(trainParamDict["scalefactors"])
-        scalematrix = bool(trainParamDict["scalematrix"])
+        clampfactors = trainParamDict["clampfactors"] == "True"
+        scalefactors = trainParamDict["scalefactors"] == "True"
+        scalematrix = trainParamDict["scalematrix"] == "True"
         modelType = str(trainParamDict["modeltype"])
         nr_Factors = int(trainParamDict["nr_factors"])
         factorNameSet = set([os.path.basename(trainParamDict["chromFactor_" + str(i)]) for i in range(nr_Factors)])
