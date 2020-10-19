@@ -572,3 +572,19 @@ def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
         pMatrixDict[mName]["seqSymbols"] = sorted(list(set(symbolList)))
         pFactorsDict[folderName]["seqSymbols"] = sorted(list(set(symbolList)))   
     records.close()
+
+
+def plotChromatinFactors(pChromSequenceArray, pBinSize, pChrom, pFolder, pFilename):
+    #plot chromatin factors
+    #for debugging purposes only, not for production use
+    winsize = pChromSequenceArray.shape[0]
+    nr_subplots = pChromSequenceArray.shape[1]
+    x_axis_values = np.arange(winsize) * pBinSize
+    fig1, axs1 = plt.subplots(nr_subplots, 1, sharex = True)
+    for i in range(nr_subplots):
+        axs1[i].plot(x_axis_values, pChromSequenceArray[:,i])
+        axs1[i].grid(True)
+    axs1[0].set_ylabel("signal val.")    
+    axs1[0].set_xlabel("chromosome" + str(pChrom))
+    axs1[0].set_title("chrom. factors from " + str(pFolder) + " chrom " + str(pChrom))
+    fig1.savefig(pFilename)
