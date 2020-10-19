@@ -2,6 +2,7 @@ import tensorflow
 from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D
 from tensorflow.keras.models import Model, Sequential
 import numpy as np 
+import utils
 
 
 def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
@@ -163,6 +164,18 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 if matrixArray is not None:
                     mName = self.factorDict[currentFolder]["matrixName"]
                     matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
+                if ind == 0:
+                    m_arr = matrixArray[b].copy()
+                    m_mat = np.zeros((self.windowsize, self.windowsize))
+                    m_mat[np.triu_indices(self.windowsize)] = m_arr
+                    m_mat = np.transpose(m_mat)
+                    m_mat[np.triu_indices(self.windowsize)] = m_arr
+                    plotTitle = "matrix_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
+                    #utils.plotMatrix(m_mat, plotTitle + ".png", plotTitle)
+                    np.save(plotTitle, m_mat)
+                    plotName = "factors_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
+                    #utils.plotChromatinFactors(chromatinFactorArray[b].copy(),25000,currentChrom,currentFolder,plotName + ".png")
+                    np.save(plotName, chromatinFactorArray[b].copy())
             #print("\ngbi", globalIndices)
             #print("locAccInd", localAccessInds)
             #print("localInd" ,localIndices)
