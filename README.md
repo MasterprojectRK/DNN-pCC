@@ -17,6 +17,8 @@ conda install scipy
 conda install matplotlib
 conda install tqdm
 conda install click
+conda install pydot
+conda install sklearn
 ```
 
 ## Usage
