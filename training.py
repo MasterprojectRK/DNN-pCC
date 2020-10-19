@@ -62,7 +62,7 @@ tf.random.set_seed(35)
                 type=bool, default=False,
                 help="Scale Hi-C matrix to [0...1]")
 @click.option("--clampFactors","-cfac", required=False,
-                type=bool, default=True,
+                type=bool, default=False,
                 help="Clamp outliers in chromatin factor data")
 @click.option("--scaleFactors","-scf", required=False,
                 type=bool, default=True,
