@@ -164,7 +164,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 if matrixArray is not None:
                     mName = self.factorDict[currentFolder]["matrixName"]
                     matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
-                if ind == 0:
+                if ind == 0 and matrixArray is not None:
                     m_arr = matrixArray[b].copy()
                     m_mat = np.zeros((self.windowsize, self.windowsize))
                     m_mat[np.triu_indices(self.windowsize)] = m_arr
