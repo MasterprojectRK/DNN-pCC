@@ -125,7 +125,11 @@ def prediction(validationmatrix,
         matricesDict = buildDummyMatrixDict(chromatinpath,chromNameList,binSizeInt,chromFactorsDict)
 
     #load chromatin factor data
-    utils.loadChromatinFactorDataPerMatrix(matricesDict,chromFactorsDict,chromNameList,scalefactors,clampfactors)
+    utils.loadChromatinFactorDataPerMatrix(pMatricesDict=matricesDict,
+                                            pChromFactorsDict=chromFactorsDict,
+                                            pChromosomes=chromNameList,
+                                            pScaleFactors=scalefactors,
+                                            pClampFactors=clampfactors)
 
     #read the DNA sequence and do a one-hot encoding
     utils.getCheckSequences(matricesDict,chromFactorsDict, sequencefile)
