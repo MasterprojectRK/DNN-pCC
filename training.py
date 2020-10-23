@@ -82,6 +82,9 @@ tf.random.set_seed(35)
 @click.option("--earlyStopping", "-early",
                 required=False, type=click.IntRange(min=5),
                 help="patience for early stopping, stop after this number of epochs w/o improvement")
+@click.option("--debugState", "-dbs", 
+                required=False, type=click.Choice([None,0,10,100,1000]),
+                default=None, help="debug state for internal use during development")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -102,7 +105,8 @@ def training(trainmatrices,
             modeltype,
             optimizer,
             loss,
-            earlystopping):
+            earlystopping,
+            debugstate):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -170,11 +174,14 @@ def training(trainmatrices,
                                                         factorDict=trainChromFactorsDict,
                                                         batchsize=batchsize,
                                                         windowsize=windowsize,
-                                                        shuffle=True)
+                                                        shuffle=True,
+                                                        debugState=debugstate)
     validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
                                                         factorDict=validationChromFactorsDict,
                                                         batchsize=batchsize,
-                                                        windowsize=windowsize)
+                                                        windowsize=windowsize,
+                                                        shuffle=False,
+                                                        debugState=debugstate)
     
     #get number and names of chromatin factors 
     #and save to parameters dictionary

@@ -136,12 +136,13 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, matrixDict, factorDict, batchsize, windowsize, shuffle=True):
+    def __init__(self, matrixDict, factorDict, batchsize, windowsize, shuffle=True, debugState=None):
         self.matrixDict = matrixDict
         self.factorDict = factorDict
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
+        self.debugState = debugState
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
         self.chromNames = []
@@ -192,7 +193,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 if matrixArray is not None:
                     mName = self.factorDict[currentFolder]["matrixName"]
                     matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
-                if ind == 0 and matrixArray is not None:
+                if self.debugState is not None and ind == self.debugState and matrixArray is not None :
                     m_arr = matrixArray[b].copy()
                     m_mat = np.zeros((self.windowsize, self.windowsize))
                     m_mat[np.triu_indices(self.windowsize)] = m_arr
