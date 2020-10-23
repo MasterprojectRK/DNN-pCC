@@ -73,7 +73,7 @@ tf.random.set_seed(35)
                 help="Type of model to use")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
-                default="Adam",
+                default="SGD",
                 help="Optimizer to use (SGD, Adam, RMSprop or cosine similarity)")
 @click.option("--loss", "-l", required=False,
                 type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
