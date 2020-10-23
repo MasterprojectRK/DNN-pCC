@@ -10,6 +10,7 @@ from tqdm import tqdm
 from scipy import sparse
 from Bio import SeqIO
 from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn import metrics as metrics
 
 def getBigwigFileList(pDirectory):
     #returns a list of bigwig files in pDirectory
@@ -589,3 +590,220 @@ def plotChromatinFactors(pChromSequenceArray, pBinSize, pChrom, pFolder, pFilena
     axs1[0].set_xlabel("chromosome" + str(pChrom))
     axs1[0].set_title("chrom. factors from " + str(pFolder) + " chrom " + str(pChrom))
     fig1.savefig(pFilename)
+
+
+def computePearsonCorrelation(pCoolerFile1, pCoolerFile2, 
+                              pWindowsize_bp,
+                              pModelChromList, pTargetChromStr,
+                              pModelCellLineList, pTargetCellLineStr,
+                              pPlotOutputFile=None, pCsvOutputFile=None):
+    sparseMatrix1, binsize1 = getMatrixFromCooler(pCoolerFile1, pTargetChromStr)
+    sparseMatrix2, binsize2 = getMatrixFromCooler(pCoolerFile2, pTargetChromStr)
+    errorMsg = ""
+    if sparseMatrix1 is None:
+        errorMsg += "Chrom {:s} could not be loaded from {:s}\n"
+        errorMsg = errorMsg.format(str(pTargetChromStr), pCoolerFile1)
+    if sparseMatrix2 is None:
+        errorMsg += "Chrom {:s} could not be loaded from {:s}\n"
+        errorMsg = errorMsg.format(str(pTargetChromStr), pCoolerFile2)
+    if errorMsg != "":
+        errorMsg += "Potential reasons: Wrong file format, wrong chromosome naming scheme or chromosome missing"
+        raise SystemExit(errorMsg)
+    if binsize1 != binsize2:
+        errorMsg = "Aborting. Binsizes of matrices are not equal\n"
+        errorMsg += "{:s} -- {:d}bp\n"
+        errorMsg += "{:s} -- {:d}bp\n"
+        errorMsg = errorMsg.format(pCoolerFile1,binsize1, pCoolerFile2, binsize2)
+        raise SystemExit(errorMsg)
+    resultsDf = computePearsonCorrelationSparse(pSparseCsrMatrix1= sparseMatrix1,
+                                                pSparseCsrMatrix2= sparseMatrix2,
+                                                pBinsize= binsize1,
+                                                pWindowsize_bp= pWindowsize_bp,
+                                                pModelChromList= pModelChromList,
+                                                pTargetChromStr= pTargetChromStr,
+                                                pModelCellLineList= pModelCellLineList,
+                                                pTargetCellLineStr= pTargetCellLineStr)
+    if pCsvOutputFile is not None:
+        resultsDf.to_csv(pCsvOutputFile)
+    if pPlotOutputFile is not None:
+        plotPearsonCorrelationDf(pResultsDfList=[resultsDf], 
+                                 pLegendList=["Pearson corr."],
+                                 pOutfile=pPlotOutputFile,
+                                 pMethod="pearson")
+    return resultsDf
+
+
+
+def computePearsonCorrelationSparse(pSparseCsrMatrix1, pSparseCsrMatrix2, pBinsize, pWindowsize_bp, 
+                                    pModelChromList, pTargetChromStr, 
+                                    pModelCellLineList, pTargetCellLineStr):
+    numberOfDiagonals = int(np.round(pWindowsize_bp/pBinsize))
+    if numberOfDiagonals < 1:
+        msg = "Window size must be larger than bin size of matrices.\n"
+        msg += "Remember to specify window in basepairs, not bins."
+        raise SystemExit(msg)
+    shape1 = pSparseCsrMatrix1.shape
+    shape2 = pSparseCsrMatrix2.shape
+    if shape1 != shape2:
+        msg = "Aborting. Shapes of matrices are not equal.\n"
+        msg += "Shape 1: ({:d},{:d}); Shape 2: ({:d},{:d})"
+        msg = msg.format(shape1[0],shape1[1],shape2[0],shape2[1])
+        raise SystemExit(msg)
+    if numberOfDiagonals > shape1[0]-1:
+        msg = "Aborting. Window size {0:d} larger than matrix size {:d}"
+        msg = msg.format(numberOfDiagonals, shape1[0]-1)
+        raise SystemExit(msg)
+    
+    trapezIndices = np.mask_indices(shape1[0],maskFunc,k=numberOfDiagonals)
+    reads1 = np.array(pSparseCsrMatrix1[trapezIndices])[0]
+    reads2 = np.array(pSparseCsrMatrix2[trapezIndices])[0]
+
+    matrixDf = pd.DataFrame(columns=['first','second','distance','reads1','reads2'])
+    matrixDf['first'] = np.uint32(trapezIndices[0])
+    matrixDf['second'] = np.uint32(trapezIndices[1])
+    matrixDf['distance'] = np.uint32(matrixDf['second'] - matrixDf['first'])
+    matrixDf['reads1'] = np.float32(reads1)
+    matrixDf['reads2'] = np.float32(reads2)
+    matrixDf.fillna(0, inplace=True)
+
+    pearsonAucIndices, pearsonAucValues = getCorrelation(matrixDf,'distance', 'reads1', 'reads2', 'pearson')
+    pearsonAucScore = metrics.auc(pearsonAucIndices, pearsonAucValues)
+    spearmanAucIncides, spearmanAucValues = getCorrelation(matrixDf,'distance', 'reads1', 'reads2', 'spearman')
+    spearmanAucScore = metrics.auc(spearmanAucIncides, spearmanAucValues)
+    print("PearsonAUC: {:.3f}".format(pearsonAucScore))
+    print("SpearmanAUC: {:.3f}".format(spearmanAucScore))
+
+    columns = ["corrMeth", "modelChroms", "targetChrom", 
+                           "modelCellLines", "targetCellLine", 
+                           "R2", "MSE", "MAE", "MSLE", "AUC",
+                           "binsize", "windowsize"]
+    columns.extend(sorted(list(matrixDf.distance.unique())))
+    resultsDf = pd.DataFrame(columns=columns)
+    resultsDf["corrMeth"] = ["pearson", "spearman"]
+    resultsDf.set_index("corrMeth", inplace=True)
+    resultsDf.loc[:, 'modelChroms'] = ", ".join([str(x) for x in pModelChromList])
+    resultsDf.loc[:, 'targetChrom'] = pTargetChromStr
+    resultsDf.loc[:, 'modelCellLines'] = ", ".join([str(x) for x in pModelCellLineList])
+    resultsDf.loc[:, 'targetCellLine'] = pTargetCellLineStr
+    resultsDf.loc[:, "R2"] = metrics.r2_score(matrixDf['reads2'], matrixDf['reads1'])
+    resultsDf.loc[:, 'MSE'] = metrics.mean_squared_error( matrixDf['reads2'], matrixDf['reads1'])
+    resultsDf.loc[:, 'MAE'] = metrics.mean_absolute_error( matrixDf['reads2'], matrixDf['reads1'])
+    resultsDf.loc[:, 'MSLE'] = metrics.mean_squared_log_error(matrixDf['reads2'], matrixDf['reads1'])
+    resultsDf.loc['pearson', 'AUC'] = pearsonAucScore 
+    resultsDf.loc['spearman', 'AUC'] = spearmanAucScore
+    resultsDf.loc[:, 'binsize'] = pBinsize
+    resultsDf.loc[:, 'windowsize'] = pWindowsize_bp
+    
+    for pearsonIndex, corrValue in zip(pearsonAucIndices,pearsonAucValues):
+        columnName = int(round(pearsonIndex * matrixDf.distance.max()))
+        resultsDf.loc["pearson", columnName] = corrValue
+    for spearmanIndex, corrValue in zip(spearmanAucIncides,spearmanAucValues):
+        columnName = int(round(spearmanIndex * matrixDf.distance.max()))
+        resultsDf.loc["spearman", columnName] = corrValue
+    return resultsDf
+    
+def plotPearsonCorrelationDf(pResultsDfList, pLegendList, pOutfile, pMethod="pearson"):
+    if pMethod not in ["pearson", "spearman"]:
+        print("plotting only supported for 'pearson' and 'spearman' correlation methods")
+        return
+    if pResultsDfList is None or pLegendList is None:
+        return
+    if not isinstance(pResultsDfList,list) or not isinstance(pLegendList,list):
+        return
+    legendStrList = [str(x) for x in pLegendList]
+    if len(pResultsDfList) != len(legendStrList):
+        msg = "can't plot, too many / too few legends\n"
+        msg += "no. of legend entries should be: {:d}, given {:d}"
+        msg = msg.format(len(pResultsDfList), len(legendStrList))
+        print(msg)
+        return
+    
+    fig1, ax1 = plt.subplots()
+    ax1.set_ylabel("{:s} correlation".format(pMethod))
+    ax1.set_xlabel("Genomic distance / Mbp")
+    trainChromSet = set()
+    targetChromSet = set()
+    trainCellLineSet = set()
+    targetCellLineSet = set()
+    maxXVal = 0
+    for i, resultsDf in enumerate(pResultsDfList):
+        try:
+            resolutionInt = int(resultsDf.loc[pMethod, 'binsize'])
+            windowsize_bp = int(resultsDf.loc[pMethod, 'windowsize'])
+            trainChromSet.add(resultsDf.loc[pMethod, 'modelChroms'])
+            targetChromSet.add(resultsDf.loc[pMethod, 'targetChrom'])
+            trainCellLineSet.add(resultsDf.loc[pMethod, 'modelCellLines'])
+            targetCellLineSet.add(resultsDf.loc[pMethod, 'targetCellLine'])
+            area_under_corr_curve = resultsDf.loc[pMethod, 'AUC']
+            maxDist_bp = int(windowsize_bp / resolutionInt)
+            columnNameList = [x for x in range(maxDist_bp)]
+            corrXValues = np.arange(maxDist_bp) * resolutionInt / 1000000
+            corrYValues = resultsDf.loc[pMethod, columnNameList].values.astype("float32")
+        except Exception as e:
+            msg = str(e) + "\n"
+            msg += "results dataframe {:d} does not contain all relevant fields (binsize, distance stratified pearson correlation data etc.)"
+            msg = msg.format(i)
+            print(msg)
+        label = pLegendList[i]
+        if label is None:
+            label = pMethod + " / AUC: {:.3f}".format(area_under_corr_curve)
+        else:
+            label = label + " / AUC: {:.3f}".format(area_under_corr_curve)
+        ax1.plot(corrXValues, corrYValues, label = label)
+        maxXVal = max(maxXVal, corrXValues[-1])
+    titleStr = "Pearson correlation vs. genomic distance"
+    if len(trainChromSet) == len(targetChromSet) == len(trainCellLineSet) == len(targetCellLineSet) == 1:
+        titleStr += "\n {:s}, {:s} on {:s}, {:s}"
+        titleStr = titleStr.format(list(trainCellLineSet)[0], list(trainChromSet)[0], list(targetCellLineSet)[0], list(targetChromSet)[0])
+    ax1.set_title(titleStr)
+    ax1.set_ylim([0,1])
+    ax1.set_xlim([0,maxXVal])
+
+    ax1.legend(frameon=False)
+    
+    if pOutfile is None:
+        outfile = "correlation.png"
+        fig1.savefig(outfile)
+    else:
+        outfile = pOutfile
+        if os.path.splitext(outfile)[1] not in ['.png', '.svg', '.pdf']:
+            outfile = os.path.splitext(pOutfile)[0] + '.png'
+            msg = "Outfile must have png, pdf or svg file extension.\n"
+            msg += "Renamed outfile to {:s}".format(outfile)
+            print(msg)
+        fig1.savefig(outfile)
+
+
+def maskFunc(pArray, pWindowSize=0):
+    #mask a trapezoid along the (main) diagonal of a 2D array
+    #this code is copied from the study project by Ralf Krauth
+    #https://github.com/MasterprojectRK/HiCPrediction/blob/master/hicprediction/createTrainingSet.py
+    maskArray = np.zeros(pArray.shape)
+    upperTriaInd = np.triu_indices(maskArray.shape[0]) # pylint: disable=unsubscriptable-object
+    notRequiredTriaInd = np.triu_indices(maskArray.shape[0], k=pWindowSize) # pylint: disable=unsubscriptable-object
+    maskArray[upperTriaInd] = 1
+    maskArray[notRequiredTriaInd] = 0
+    return maskArray
+
+def getCorrelation(pData, pDistanceField, pTargetField, pPredictionField, pCorrMethod):
+    """
+    Helper method to calculate correlation
+    This method has originally been written by Andre Bajorat during his study project,
+    licensed under the MIT License: 
+    https://github.com/abajorat/HiCPrediction/blob/master/hicprediction/predict.py
+    It has been adapted by Ralf Krauth during his study project:
+    https://github.com/MasterprojectRK/HiCPrediction/blob/master/hicprediction/predict.py
+    """
+    new = pData.groupby(pDistanceField, group_keys=False)[[pTargetField,
+        pPredictionField]].corr(method=pCorrMethod)
+    new = new.iloc[0::2,-1]
+    #sometimes there is no variation in prediction / target per distance, then correlation is NaN
+    #need to drop these, otherwise AUC will be NaN, too.
+    new.dropna(inplace=True) 
+    values = new.values
+    indices = new.index.tolist()
+    indices = list(map(lambda x: x[0], indices))
+    indices = np.array(indices)
+    div = pData[pDistanceField].max()
+    indices = indices / div 
+    return indices, values
