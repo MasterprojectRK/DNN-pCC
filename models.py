@@ -68,8 +68,35 @@ def buildModelMoreConvolutions(pWindowSize, pNrFactors):
     return model
 
 
+def buildModelWiderFilter(pWindowSize, pNrFactors):
+    kernelWidth = 6
+    nr_filters1 = 1
+    nr_neurons1 = 460
+    nr_neurons2 = 881
+    nr_neurons3 = 1690
+    nr_neurons4 = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
+    model = Sequential()
+    model.add(Conv1D(name="input_layer",
+                     filters=nr_filters1, 
+                     kernel_size=kernelWidth,
+                     padding="same", 
+                     activation="sigmoid",
+                     data_format="channels_last",
+                     input_shape=(3*pWindowSize,pNrFactors)))
+    model.add(Flatten(name="flatten_1"))
+    model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2",name="dense_1"))        
+    model.add(Dropout(0.1))
+    model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2",name="dense_2"))
+    model.add(Dropout(0.1))
+    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2",name="dense_3"))
+    model.add(Dropout(0.1))
+    model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2",name="output_layer"))
+    return model
+
+
 def buildCurrentModel(pWindowSize, pNrFactors):
-    return buildModelMoreConvolutions(pWindowSize, pNrFactors)
+    #return buildModelMoreConvolutions(pWindowSize, pNrFactors)
+    return buildModelWiderFilter(pWindowSize, pNrFactors)
 
 def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
     #consists of two subnets for chromatin factors and sequence, respectively
