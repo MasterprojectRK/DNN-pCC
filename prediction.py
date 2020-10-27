@@ -83,12 +83,9 @@ def prediction(validationmatrix,
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
         raise SystemExit(msg)
 
-    #extract chromosome name and size from the input
+    #extract chromosome names and size from the input
     chromNameList = chromosome.rstrip().split(" ")  
-    chromNameList = [x.lstrip("chr") for x in chromNameList]
-    if len(chromNameList) != 1:
-        msg = "Predicting/Testing on more than one chromosome currently not supported"
-        raise SystemExit(msg)
+    chromNameList = sorted([x.lstrip("chr") for x in chromNameList])
 
     #check chromatin files first
     #if there are too few or too much, 
@@ -143,16 +140,31 @@ def prediction(validationmatrix,
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
     
-    #Scale predicted matrix to 0...1 
-    #and multiply with given multiplier for better visualization.
-    predMatrixArray = utils.scaleArray(predMatrixArray) * multiplier
-
-    #rebuild the cooler matrix from the predictions and write out
-    meanMatrix = utils.rebuildMatrix(predMatrixArray,windowsize)
+    #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
+    #they are ordered by chromosome names
+    #first find the chrom lengths in bins
+    chrLengthInBinsList = [chromFactorsDict[chromatinpath]["data"][chrom].shape[0] - 3*windowsize + 1  for chrom in chromNameList]
+    if sum(chrLengthInBinsList) != predMatrixArray.shape[0]:
+        msg = "Aborting. Failed separating prediction into single chromosomes"
+        raise SystemExit(msg)
+    #now split the prediction up into arrays of submatrices for each chromosome
+    #scale predicted submatrices to 0...1
+    indicesList = [sum(chrLengthInBinsList[0:i]) for i in range(len(chrLengthInBinsList)+1)]
+    matrixPerChromList = []
+    for i,j in zip(indicesList, indicesList[1:]):
+        matrixPerChromList.append( utils.scaleArray(predMatrixArray[i:j,:]) * multiplier)
+    
+    #rebuild the cooler matrices from the overlapping 
+    #submatrices for each chromosome and write to disk
+    for i, matrix in enumerate(matrixPerChromList):
+        matrixPerChromList[i] = utils.rebuildMatrix(matrix, windowsize)
     coolerMatrixName = outputpath + "predMatrix.cool"
-    utils.writeCooler([meanMatrix],binSizeInt,coolerMatrixName,[chromosome])
+    utils.writeCooler(pMatrixList=matrixPerChromList,
+                     pBinSizeInt=binSizeInt,
+                     pOutfile=coolerMatrixName,
+                     pChromosomeList=chromNameList)
 
-    #If target matrix provided, compute some figures 
+    #If target matrix provided, compute loss 
     #to assess prediction quality
     if validationmatrix is not None:
         evalGenerator = models.multiInputGenerator(matrixDict=matricesDict,
