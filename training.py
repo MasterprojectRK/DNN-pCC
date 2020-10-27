@@ -126,7 +126,7 @@ def training(trainmatrices,
 
     #extract chromosome names and size from the input
     trainChromNameList = trainchromosomes.rstrip().split(" ")  
-    trainChromNameList = [x.lstrip("chr") for x in trainChromNameList]  
+    trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
     #check if all requested chroms are present in all train matrices
     trainMatricesDict = utils.checkGetChromsPresentInMatrices(trainmatrices,trainChromNameList)
     #check if all requested chroms are present in all bigwig files
@@ -137,7 +137,7 @@ def training(trainmatrices,
 
     #repeat the steps above for the validation matrices and chromosomes
     validationChromNameList = validationchromosomes.rstrip().split(" ")
-    validationChromNameList = [x.lstrip("chr") for x in validationChromNameList]
+    validationChromNameList = sorted([x.lstrip("chr") for x in validationChromNameList])
     validationMatricesDict = utils.checkGetChromsPresentInMatrices(validationmatrices, validationChromNameList)
     validationChromFactorsDict = utils.checkGetChromsPresentInFactors(validationchromatinpaths, validationChromNameList)
     utils.checkChromSizesMatching(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
