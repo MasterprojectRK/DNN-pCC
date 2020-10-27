@@ -68,8 +68,8 @@ tf.random.set_seed(35)
                 type=bool, default=True,
                 help="Scale chromatin factor data to range 0...1 (recommended)")
 @click.option("--modelType", "-mod", required=False,
-                type=click.Choice(["initial", "current", "sequence"]),
-                default="current",
+                type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
+                default="wider-longer",
                 help="Type of model to use")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),

@@ -6,125 +6,89 @@ import utils
 
 
 def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
+    sequentialModel = False
+    nrFiltersList = []
+    kernelSizeList = []
+    nrNeuronsList = []
     if pModelTypeStr == "initial":
-        return buildInitialModel(pWindowSize, pNrFactors)
-    elif pModelTypeStr == "current":
-        return buildCurrentModel(pWindowSize, pNrFactors)
-    elif pModelTypeStr == "sequence":
+        #original model by Farre et al
+        #See publication "Dense neural networks for predicting chromatin conformation" (https://doi.org/10.1186/s12859-018-2286-z).
+        nrFiltersList = [1]
+        kernelSizeList = [1]
+        nrNeuronsList = [460,881,1690]
+        sequentialModel = True
+    elif pModelTypeStr == "wider":
+        #test model with wider filters
+        nrFiltersList = [1]
+        kernelSizeList = [6]
+        nrNeuronsList = [460,881,1690]
+        sequentialModel = True
+    elif pModelTypeStr == "longer":
+        #test model with more convolution filters
+        nrFiltersList = [6,6]
+        kernelSizeList= [1,1]
+        nrNeuronsList = [1500,2400]
+        sequentialModel = True
+    elif pModelTypeStr == "wider-longer":
+        #test model with more AND wider convolution filters
+        nrFiltersList = [6,6]
+        kernelSizeList= [6,6]
+        nrNeuronsList = [1500,2400]
+        sequentialModel = True
+    
+    if sequentialModel == True:
+        return buildSequentialModel(pWindowSize=pWindowSize,
+                                    pNrFactors=pNrFactors,
+                                    pNrFiltersList=nrFiltersList,
+                                    pKernelWidthList=kernelSizeList,
+                                    pNrNeuronsList=nrNeuronsList)
+    elif sequentialModel == False and pModelTypeStr == "sequence":
         return buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols)
     else:
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildInitialModel(pWindowSize, pNrFactors):
-    #neural network as per Farre et al.
-    #See publication "Dense neural networks for predicting chromatin conformation" (https://doi.org/10.1186/s12859-018-2286-z).
-    kernelWidth = 1
-    nr_neurons1 = 460
-    nr_neurons2 = 881
-    nr_neurons3 = 1690
-    nr_neurons4 = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
+def buildSequentialModel(pWindowSize, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList):
+    msg = ""
+    if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
+        msg += "No. of filters must be a list\n"
+    if pKernelWidthList is None or not isinstance(pKernelWidthList, list):
+        msg += "Kernel widths must be a list\n"
+    if pNrNeuronsList is None or not isinstance(pNrNeuronsList, list):
+        msg += "No. of neurons must be a list\n"
+    if msg != "":
+        print(msg)
+        return None
+    if len(pNrFiltersList) != len(pKernelWidthList) or len(pNrFiltersList) < 1:
+        msg = "kernel widths and no. of filters must be specified for all 1Dconv. layers (min. 1 layer)"
+        print(msg)
+        return None
     model = Sequential()
-    model.add(Conv1D(filters=1, 
-                     kernel_size=kernelWidth, 
-                     activation="sigmoid",
-                     data_format="channels_last",
-                     input_shape=(3*pWindowSize,pNrFactors)))
-    model.add(Flatten())
-    model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    return model
-
-def buildModelMoreConvolutions(pWindowSize, pNrFactors):
-    kernelWidth = 1
-    nr_filters1 = 6
-    nr_filters2 = 6
-    nr_neurons1 = 1500
-    nr_neurons2 = 2400
-    nr_neurons3 = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
-    model = Sequential()
-    model.add(Conv1D(name="input_layer",
-                     filters=nr_filters1, 
-                     kernel_size=kernelWidth, 
-                     activation="sigmoid",
-                     data_format="channels_last",
-                     input_shape=(3*pWindowSize,pNrFactors)))
-    model.add(Conv1D(name="conv1D_1",
-                     filters=nr_filters2, 
-                     kernel_size=kernelWidth, 
-                     activation="sigmoid",
-                     data_format="channels_last"))
+    #add the requested number of 1D convolutions
+    for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
+        convParamDict = dict()
+        convParamDict["name"] = "conv1D_" + str(i + 1)
+        convParamDict["filters"] = nr_filters
+        convParamDict["kernel_size"] = kernelWidth
+        convParamDict["activation"] = "sigmoid"
+        convParamDict["data_format"]="channels_last"
+        if kernelWidth > 1:
+            convParamDict["padding"] = "same"
+        if i == 0:
+            convParamDict["input_shape"] = (3*pWindowSize,pNrFactors)
+        model.add(Conv1D(**convParamDict))
+    #flatten the output from the convolutions
     model.add(Flatten(name="flatten_1"))
-    model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2", name="dense_1"))        
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2", name="dense_2"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2", name="output_layer"))
+    #add the requested number of dense layers and dropout
+    for i, nr_neurons in enumerate(pNrNeuronsList):
+        layerName = "dense_" + str(i+1)
+        model.add(Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName))
+        layerName = "dropout_" + str(i+1)
+        model.add(Dropout(0.1, name=layerName))
+    #add the output layer (corresponding to a predicted submatrix along the diagonal of a Hi-C matrix)
+    nr_outputNeurons = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even    
+    model.add(Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="output_layer"))
     return model
-
-
-def buildModelWiderFilter(pWindowSize, pNrFactors):
-    kernelWidth = 6
-    nr_filters1 = 1
-    nr_neurons1 = 460
-    nr_neurons2 = 881
-    nr_neurons3 = 1690
-    nr_neurons4 = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
-    model = Sequential()
-    model.add(Conv1D(name="input_layer",
-                     filters=nr_filters1, 
-                     kernel_size=kernelWidth,
-                     padding="same", 
-                     activation="sigmoid",
-                     data_format="channels_last",
-                     input_shape=(3*pWindowSize,pNrFactors)))
-    model.add(Flatten(name="flatten_1"))
-    model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2",name="dense_1"))        
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2",name="dense_2"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2",name="dense_3"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2",name="output_layer"))
-    return model
-
-def buildModelWiderFilterMoreConvolutions(pWindowSize, pNrFactors):
-    kernelWidth = 6
-    nr_filters1 = 6
-    nr_filters2 = 6
-    nr_neurons1 = 1500
-    nr_neurons2 = 2400
-    nr_neurons3 = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
-    model = Sequential()
-    model.add(Conv1D(name="conv1D_1",
-                     filters=nr_filters1, 
-                     padding="same",
-                     kernel_size=kernelWidth, 
-                     activation="sigmoid",
-                     data_format="channels_last",
-                     input_shape=(3*pWindowSize,pNrFactors)))
-    model.add(Conv1D(name="conv1D_2",
-                     filters=nr_filters2,
-                     padding="same", 
-                     kernel_size=kernelWidth, 
-                     activation="sigmoid",
-                     data_format="channels_last"))
-    model.add(Flatten(name="flatten_1"))
-    model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2", name="dense_1"))        
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2", name="dense_2"))
-    model.add(Dropout(0.1))
-    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2", name="output_layer"))
-    return model
-
-def buildCurrentModel(pWindowSize, pNrFactors):
-    #return buildModelMoreConvolutions(pWindowSize, pNrFactors)
-    return buildModelWiderFilter(pWindowSize, pNrFactors)
 
 def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
     #consists of two subnets for chromatin factors and sequence, respectively
