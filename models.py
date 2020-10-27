@@ -93,6 +93,34 @@ def buildModelWiderFilter(pWindowSize, pNrFactors):
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2",name="output_layer"))
     return model
 
+def buildModelWiderFilterMoreConvolutions(pWindowSize, pNrFactors):
+    kernelWidth = 6
+    nr_filters1 = 6
+    nr_filters2 = 6
+    nr_neurons1 = 1500
+    nr_neurons2 = 2400
+    nr_neurons3 = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
+    model = Sequential()
+    model.add(Conv1D(name="conv1D_1",
+                     filters=nr_filters1, 
+                     padding="same",
+                     kernel_size=kernelWidth, 
+                     activation="sigmoid",
+                     data_format="channels_last",
+                     input_shape=(3*pWindowSize,pNrFactors)))
+    model.add(Conv1D(name="conv1D_2",
+                     filters=nr_filters2,
+                     padding="same", 
+                     kernel_size=kernelWidth, 
+                     activation="sigmoid",
+                     data_format="channels_last"))
+    model.add(Flatten(name="flatten_1"))
+    model.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2", name="dense_1"))        
+    model.add(Dropout(0.1))
+    model.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2", name="dense_2"))
+    model.add(Dropout(0.1))
+    model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2", name="output_layer"))
+    return model
 
 def buildCurrentModel(pWindowSize, pNrFactors):
     #return buildModelMoreConvolutions(pWindowSize, pNrFactors)
