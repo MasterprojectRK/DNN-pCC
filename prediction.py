@@ -150,7 +150,7 @@ def prediction(validationmatrix,
     #rebuild the cooler matrix from the predictions and write out
     meanMatrix = utils.rebuildMatrix(predMatrixArray,windowsize)
     coolerMatrixName = outputpath + "predMatrix.cool"
-    utils.writeCooler(meanMatrix,binSizeInt,coolerMatrixName,chromosome)
+    utils.writeCooler([meanMatrix],binSizeInt,coolerMatrixName,[chromosome])
 
     #If target matrix provided, compute some figures 
     #to assess prediction quality

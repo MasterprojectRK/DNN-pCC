@@ -165,41 +165,69 @@ def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
         matrixArray[i] = trainmatrix
     return matrixArray
 
-def writeCooler(pMatrix, pBinSizeInt, pOutfile, pChromosome, pChromSize=None,  pMetadata=None):
-    #takes a matrix as numpy array and writes a cooler matrix from it
-    #widely copied from study project
-    
-    #the chromosome size may not be integer-divisible by the bin size
-    #so specifying the real chrom size is possible, but the
-    #number of bins must still correspond to the matrix size
-    chromSizeInt = int(pMatrix.shape[0] * pBinSizeInt)
-    if pChromSize is not None \
-                and pChromSize > (chromSizeInt - pBinSizeInt)\
-                and pChromSize < chromSizeInt:
-        chromSizeInt = int(pChromSize)
-        
-    #create the bins for cooler
-    bins = pd.DataFrame(columns=['chrom','start','end'])
-    binStartList = list(range(0, chromSizeInt, int(pBinSizeInt)))
-    binEndList = list(range(int(pBinSizeInt), chromSizeInt, int(pBinSizeInt)))
-    binEndList.append(chromSizeInt)
-    bins['start'] = binStartList
-    bins['end'] = binEndList
-    bins['chrom'] = str(pChromosome)
+def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeList=None,  pMetadata=None):
+    #takes a matrix as numpy array or sparse matrix and writes a cooler matrix from it
+    #modified from study project such that multiple chroms can be written to a single matrix
 
-    #create the pixels for cooler
-    triu_Indices = np.triu_indices(pMatrix.shape[0])
-    pixels = pd.DataFrame(columns=['bin1_id','bin2_id','count'])
-    pixels['bin1_id'] = triu_Indices[0]
-    pixels['bin2_id'] = triu_Indices[1]
-    readCounts = pMatrix[triu_Indices]
-    if sparse.isspmatrix_csr(pMatrix): #for sparse matrices, slicing is different
-        readCounts = np.transpose(readCounts)
-    pixels['count'] = np.float64(readCounts)
+    if pMatrixList is None or pChromosomeList is None or pBinSizeInt is None or pOutfile is None:
+        msg = "input empty. No cooler matrix written"
+        return
+    if len(pMatrixList) != len(pChromosomeList):
+        msg = "number of input arrays and chromosomes must be the same"
+        print(msg)
+        return
+    if pChromSizeList is not None and len(pChromSizeList) != len(pChromosomeList):
+        msg = "if chrom sizes are given, they must be provided for ALL chromosomes"
+    
+    bins = pd.DataFrame(columns=['chrom','start','end'])
+    pixels = pd.DataFrame(columns=['bin1_id','bin2_id','count']) 
+    
+    
+    for i, (matrix, chrom) in enumerate(zip(pMatrixList,pChromosomeList)):
+        #the chromosome size may not be integer-divisible by the bin size
+        #so specifying the real chrom size is possible, but the
+        #number of bins must still correspond to the matrix size
+        chromSizeInt = int(matrix.shape[0] * pBinSizeInt)
+        if pChromSizeList is not None \
+                and pChromSizeList[i] is not None \
+                and pChromSizeList[i] > (chromSizeInt - pBinSizeInt)\
+                and pChromSizeList[i] < chromSizeInt:
+            chromSizeInt = int(pChromSizeList[0])
+        
+        #store offset for later
+        offset = bins.shape[0]
+
+        #create the bins for cooler
+        bins_tmp = pd.DataFrame(columns=['chrom','start','end'])
+        binStartList = list(range(0, chromSizeInt, int(pBinSizeInt)))
+        binEndList = list(range(int(pBinSizeInt), chromSizeInt, int(pBinSizeInt)))
+        binEndList.append(chromSizeInt)
+        bins_tmp['start'] = np.uint32(binStartList)
+        bins_tmp['end'] = np.uint32(binEndList)
+        bins_tmp["chrom"] = str(chrom)
+        bins = bins.append(bins_tmp, ignore_index=True)
+
+        #create the pixels for cooler
+        triu_Indices = np.triu_indices(matrix.shape[0])
+        pixels_tmp = pd.DataFrame(columns=['bin1_id','bin2_id','count'])
+        pixels_tmp['bin1_id'] = (triu_Indices[0] + offset).astype("uint32")
+        pixels_tmp['bin2_id'] = (triu_Indices[1] + offset).astype("uint32")
+        readCounts = matrix[triu_Indices]
+        if sparse.isspmatrix_csr(matrix): #for sparse matrices, slicing is different
+            readCounts = np.transpose(readCounts)
+        pixels_tmp['count'] = np.float64(readCounts)
+        pixels = pixels.append(pixels_tmp, ignore_index=True)
+
+    #convert the data types
+    pixels["bin1_id"] = pixels["bin1_id"].astype("uint32")
+    pixels["bin2_id"] = pixels["bin2_id"].astype("uint32")
+    bins["start"] = bins["start"].astype("uint32")
+    bins["end"] = bins["end"].astype("uint32")
+
     pixels.sort_values(by=['bin1_id','bin2_id'],inplace=True)
 
     #write out the cooler
-    cooler.create_cooler(pOutfile, bins=bins, pixels=pixels, dtypes={'count': np.float64}, metadata=pMetadata)
+    cooler.create_cooler(pOutfile, bins=bins, pixels=pixels, dtypes={'count': np.float64}, ordered=True, metadata=pMetadata)
 
 def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     #compute the means along the diagonals (= same distance)
