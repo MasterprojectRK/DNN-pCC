@@ -300,6 +300,18 @@ def readSequences(pDNAFastaFileStr):
         print(msg)
     return sequenceStr
 
+def readSequencesPerId(pDNAFastaFileStr, pIdentifier):
+    sequenceStr = ""
+    try:
+        seqDict = SeqIO.index(pDNAFastaFileStr,"fasta")
+        sequenceStr = str(seqDict[pIdentifier].seq)
+    except Exception as e:
+        msg = "Could not read DNA sequence for chrom {:s} from fasta file {:s}\n"
+        msg += str(e)
+        msg = msg.format(pIdentifier, pDNAFastaFileStr)
+        print(msg)
+    return sequenceStr
+
 def encodeSequence(pSequenceStr):
     if pSequenceStr is None or pSequenceStr == "":
         msg = "Aborting. DNA sequence is empty"
@@ -599,9 +611,9 @@ def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
         pMatrixDict[mName]["seqFile"] = pSequenceFile
         folderName = pMatrixDict[mName]["chromatinFolder"]
         pFactorsDict[folderName]["seqID"] = seqIdDict
-        pFactorsDict[folderName]["seqFile"] = pSequenceFile
+        pFactorsDict[folderName]["seqFile"] = pSequenceFile   
     records.close()
-
+    
     #store symbols, interesting for later one-hot encoding
     symbolsSet = set()
     for key in symbolsDict:
