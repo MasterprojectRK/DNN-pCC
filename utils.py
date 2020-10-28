@@ -559,17 +559,14 @@ def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
         msg += "Current sizes: " + ", ".join(str(x) for x in binSizeList)
         raise SystemExit(msg)
     try:
+        print("Checking sequences in {:s}. This may take a while.".format(pSequenceFile))
         records = SeqIO.index(pSequenceFile, format="fasta")
     except Exception as e:
         print(e)
         msg = "Could not read sequence file. Wrong format?"
         raise SystemExit(msg)
-    #find number of symbols in DNA (usually A,C,G,T and possibly N)
-    symbolList = []
-    for record in records:
-        seqStr = records[record].seq.upper()
-        symbolList.extend(set(list(seqStr)))
-    del seqStr
+    print("Sequence file loaded...")
+    symbolsDict = dict()
     #check if all chromosomes are in the sequence file
     #and if they have the appropriate length
     seqIdList = list(records)
@@ -589,19 +586,29 @@ def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
             chromLengthSequence = len(records[ seqIdDict[chrom] ])
             chromLengthMatrix = pMatrixDict[mName]["chromsizes"][chrom]
             if chromLengthSequence != chromLengthMatrix:
-                msg = "Aborting. Chromosome {:s} in sequence file {:s} has bad length\n"
+                msg = "Aborting. Chromosome {:s} in sequence file {:s} has wrong length\n"
                 msg += "Matrix and chrom. factors: {:d} - Sequence File {:d}"    
                 msg = msg.format(seqIdDict[chrom], pSequenceFile, chromLengthSequence, chromLengthMatrix)
                 raise SystemExit(msg)
+            if chrom not in symbolsDict:
+                print("Checking symbols in DNA seq. of chrom {:s}".format(chrom))
+                seqStr = records[seqIdDict[chrom]].seq.upper()
+                symbolsDict[chrom] = set(list(seqStr))
+                del seqStr
         pMatrixDict[mName]["seqID"] = seqIdDict
         pMatrixDict[mName]["seqFile"] = pSequenceFile
         folderName = pMatrixDict[mName]["chromatinFolder"]
         pFactorsDict[folderName]["seqID"] = seqIdDict
         pFactorsDict[folderName]["seqFile"] = pSequenceFile
-        #add number of symbols
-        pMatrixDict[mName]["seqSymbols"] = sorted(list(set(symbolList)))
-        pFactorsDict[folderName]["seqSymbols"] = sorted(list(set(symbolList)))   
     records.close()
+
+    #store symbols, interesting for later one-hot encoding
+    symbolsSet = set()
+    for key in symbolsDict:
+        symbolsSet = symbolsSet.union(symbolsDict[key])
+    for mName in pMatrixDict:
+        pMatrixDict[mName]["seqSymbols"] = sorted(list(symbolsSet))
+        pFactorsDict[folderName]["seqSymbols"] = sorted(list(symbolsSet))
 
 
 def plotChromatinFactors(pChromSequenceArray, pBinSize, pChrom, pFolder, pFilename):
