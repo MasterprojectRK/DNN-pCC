@@ -168,21 +168,6 @@ def training(trainmatrices,
     utils.getCheckSequences(trainMatricesDict,trainChromFactorsDict, sequencefile)
     utils.getCheckSequences(validationMatricesDict, validationChromFactorsDict, sequencefile)
     
-
-    #generators for training and validation data
-    trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
-                                                        factorDict=trainChromFactorsDict,
-                                                        batchsize=batchsize,
-                                                        windowsize=windowsize,
-                                                        shuffle=True,
-                                                        debugState=debugstate)
-    validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
-                                                        factorDict=validationChromFactorsDict,
-                                                        batchsize=batchsize,
-                                                        windowsize=windowsize,
-                                                        shuffle=False,
-                                                        debugState=debugstate)
-    
     #get number and names of chromatin factors 
     #and save to parameters dictionary
     nr_factors = max([trainChromFactorsDict[folder]["nr_factors"] for folder in trainChromFactorsDict])
@@ -201,7 +186,22 @@ def training(trainmatrices,
     if sequencefile is not None:
         nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
     paramDict["nr_symbols"] = nr_symbols
-    
+
+    #generators for training and validation data
+    trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
+                                                        factorDict=trainChromFactorsDict,
+                                                        batchsize=batchsize,
+                                                        windowsize=windowsize,
+                                                        binsize=binsize,
+                                                        shuffle=True,
+                                                        debugState=debugstate)
+    validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
+                                                        factorDict=validationChromFactorsDict,
+                                                        batchsize=batchsize,
+                                                        windowsize=windowsize,
+                                                        binsize=binsize,
+                                                        shuffle=False,
+                                                        debugState=debugstate)    
 
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
