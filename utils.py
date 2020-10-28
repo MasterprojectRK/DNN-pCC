@@ -304,7 +304,7 @@ def readSequencesPerId(pDNAFastaFileStr, pIdentifier):
     sequenceStr = ""
     try:
         seqDict = SeqIO.index(pDNAFastaFileStr,"fasta")
-        sequenceStr = str(seqDict[pIdentifier].seq)
+        sequenceStr = str(seqDict[pIdentifier].seq.upper())
     except Exception as e:
         msg = "Could not read DNA sequence for chrom {:s} from fasta file {:s}\n"
         msg += str(e)
