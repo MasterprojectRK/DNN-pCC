@@ -1,7 +1,8 @@
 import tensorflow
 from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D
 from tensorflow.keras.models import Model, Sequential
-import numpy as np 
+import numpy as np
+import threading 
 import utils
 
 
@@ -155,7 +156,7 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, matrixDict, factorDict, batchsize, windowsize, shuffle=True, debugState=None):
+    def __init__(self, matrixDict, factorDict, batchsize, windowsize, binsize=None, shuffle=True, debugState=None):
         self.matrixDict = matrixDict
         self.factorDict = factorDict
         self.batchsize = batchsize
@@ -173,6 +174,22 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         #disable shuffling when no target data is available (i.e. for predictions)
         if self.matrixDict is None: 
             self.shuffle = False
+        #list with DNA sequences per chromosome, two entries
+        #the idea is that all threads are usually working on the current entry
+        #the first thread to require more data will load it to the second entry
+        self._dnaSequenceLock = threading.Lock()
+        self.currentSequenceIndex = 0 #to be updated only with lock, 0 or 1
+        self.dnaSequenceList = [dict(), dict()] #to be updated only with lock
+        self.sequencePresent = False
+        for folder in self.factorDict:
+            if "seqFile" in self.factorDict[folder]:
+                self.sequencePresent = True
+                break
+        self.sequenceSymbolSet = None
+        self.binsize = binsize
+        if self.sequencePresent:
+            tmpSymbolsList = [factorDict[folder]["seqSymbols"] for folder in factorDict]
+            self.sequenceSymbolSet = set([item for sublist in tmpSymbolsList for item in sublist])
         #initial shuffling of local indices
         self.on_epoch_end()
 
@@ -183,7 +200,6 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
 
     def __getitem__(self, index):
         indices = self.globalIndex[index*self.batchsize : (index+1)*self.batchsize]
-        #print("\nind", indices)
         return self.__generateData(indices)
 
     def __generateData(self, globalIndices):
@@ -194,6 +210,9 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         matrixArray = None
         if self.matrixDict is not None:
             matrixArray = np.empty((len(globalIndices), int(self.windowsize*(self.windowsize + 1)/2)))
+        sequenceArray = None
+        if self.sequencePresent:
+            sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)))
         #find the correct global -> local mapping for of the first and last global index in the batch
         indBreakpoints = [bp for bp in self.globalIndexMapping]
         lowerMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[0])
@@ -212,7 +231,9 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 if matrixArray is not None:
                     mName = self.factorDict[currentFolder]["matrixName"]
                     matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
-                if self.debugState is not None and ind == self.debugState and matrixArray is not None :
+                if self.sequencePresent == True:
+                    sequenceArray[b] = self.__checkGetDNAsequence(currentFolder, currentChrom, ind)
+                if self.debugState is not None and ind == self.debugState and matrixArray is not None:
                     m_arr = matrixArray[b].copy()
                     m_mat = np.zeros((self.windowsize, self.windowsize))
                     m_mat[np.triu_indices(self.windowsize)] = m_arr
@@ -224,10 +245,6 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                     plotName = "factors_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
                     #utils.plotChromatinFactors(chromatinFactorArray[b].copy(),25000,currentChrom,currentFolder,plotName + ".png")
                     np.save(plotName, chromatinFactorArray[b].copy())
-            #print("\ngbi", globalIndices)
-            #print("locAccInd", localAccessInds)
-            #print("localInd" ,localIndices)
-            #print("chrom", currentChrom, "folder", currentFolder)
         else:
             #some samples are from one chrom/folder pair and the others from another one 
             #split the access indices into lower and upper part
@@ -252,12 +269,16 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 if matrixArray is not None:
                     mName = self.factorDict[currentFolderLower]["matrixName"]
                     matrixArray[b] = self.__getMatrixData(mName,currentChromLower, ind)
+                if self.sequencePresent == True:
+                    sequenceArray[b] = self.__checkGetDNAsequence(currentFolderLower, currentChromLower, ind)
             indOffset = len(localIndicesLower)
             for b, ind in enumerate(localIndicesUpper):
                 chromatinFactorArray[b+indOffset] = self.__getFactorData(currentFolderUpper, currentChromUpper, ind)
                 if matrixArray is not None:
                     mName = self.factorDict[currentFolderUpper]["matrixName"]
                     matrixArray[b+indOffset] = self.__getMatrixData(mName,currentChromUpper, ind)
+                if self.sequencePresent == True:
+                    sequenceArray[b+indOffset] = self.__checkGetDNAsequence(currentFolderUpper, currentChromUpper, ind)
         if matrixArray is not None:
             return [chromatinFactorArray], matrixArray
         else:
@@ -314,3 +335,40 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         startInd = idx
         stopInd = startInd + 3*self.windowsize
         return self.factorDict[folder]["data"][chromName][startInd:stopInd,:]
+    
+    def __checkGetDNAsequence(self, folder, chromname, idx):
+        #check if the DNA sequence is already loaded
+        #and reload, if not
+        #this method should work as long as there are 
+        #more batches in each chromosome than worker threads
+        startInd = idx + self.windowsize * self.binsize
+        stopInd = startInd + self.windowsize * self.binsize            
+        requiredSeqFile = self.factorDict[folder]["seqFile"]
+        requiredChromName = self.factorDict[folder]["seqID"][chromname]
+        requiredSeqIdentifier = requiredSeqFile + "_" + str(requiredChromName)
+        retArr = None
+        with self._dnaSequenceLock:
+            #check if the seqFile is loaded already
+            oldSeqIndex = (self.currentSequenceIndex + 1) % 2
+            currentSeqDict = self.dnaSequenceList[self.currentSequenceIndex]
+            oldSeqDict = self.dnaSequenceList[oldSeqIndex]
+            if requiredSeqIdentifier not in currentSeqDict \
+                and requiredSeqIdentifier not in oldSeqDict:
+                presentIdListOld = [identifier for identifier in oldSeqDict]
+                #presentIdListCurr = [identifier for identifier in currentSeqDict]
+                #load the sequence data from disk
+                tmp_seqStr = utils.readSequencesPerId(requiredSeqFile, requiredChromName)
+                encodedSeqArr = utils.fillEncodedSequence(utils.encodeSequence(tmp_seqStr),self.binsize)
+                retArr = encodedSeqArr[startInd:stopInd]
+                #replace "old" dict with new data and update pointer to "current" dict
+                self.dnaSequenceList[oldSeqIndex] = {requiredSeqIdentifier: encodedSeqArr}
+                self.currentSequenceIndex = oldSeqIndex
+                threadName = threading.current_thread().getName()
+                msg = "Thread {:s} has loaded {:s}, replacing {:s}"
+                msg = msg.format(threadName, requiredSeqIdentifier, ", ".join(presentIdListOld))
+                print(msg)
+            elif requiredSeqIdentifier in currentSeqDict:
+                retArr = currentSeqDict[requiredSeqIdentifier][startInd:stopInd]
+            else:
+                retArr = oldSeqDict[requiredSeqIdentifier][startInd:stopInd]
+        return retArr
