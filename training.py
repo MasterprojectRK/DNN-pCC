@@ -85,6 +85,8 @@ tf.random.set_seed(35)
 @click.option("--debugState", "-dbs", 
                 required=False, type=click.Choice(["0","10","100","1000"]),
                 help="debug state for internal use during development")
+@click.option("--figureType", type=click.Choice(["png","svg","pdf"]),
+                required=False, default="png")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -106,7 +108,8 @@ def training(trainmatrices,
             optimizer,
             loss,
             earlystopping,
-            debugstate):
+            debugstate,
+            figuretype):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -284,7 +287,9 @@ def training(trainmatrices,
         dictWriter.writerow(paramDict)
 
     #plot the model
-    tf.keras.utils.plot_model(model,show_shapes=True, to_file=outputpath + "model.png")
+    modelPlotName = "model.{:s}".format(figuretype)
+    modelPlotName = os.path.join(outputpath, modelPlotName)
+    tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
     #don't shuffle when sequencefile present
     #to avoid reloading sequences
@@ -303,7 +308,8 @@ def training(trainmatrices,
     model.save(filepath=modelfilepath,save_format="h5")
 
     #plot train- and validation loss over epochs
-    lossPlotFilename = outputpath + "lossOverEpochs.png"
+    lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
+    lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
     utils.plotLoss(history, lossPlotFilename)
 
 
