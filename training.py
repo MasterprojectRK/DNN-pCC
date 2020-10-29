@@ -302,7 +302,8 @@ def training(trainmatrices,
               shuffle=shuffle,
               epochs= numberepochs,
               validation_data= validationDataGenerator,
-              callbacks=callback_fns
+              callbacks=callback_fns,
+              workers=20
             )
 
     #store the trained network
