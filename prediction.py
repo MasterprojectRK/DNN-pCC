@@ -135,6 +135,7 @@ def prediction(validationmatrix,
                                                 factorDict=chromFactorsDict,
                                                 batchsize=batchSizeInt,
                                                 windowsize=windowsize,
+                                                binsize=binSizeInt,
                                                 shuffle=False)  
 
     #feed the chromatin factors through the trained model
@@ -171,6 +172,7 @@ def prediction(validationmatrix,
                                                   factorDict=chromFactorsDict,
                                                   batchsize=batchSizeInt,
                                                   windowsize=windowsize,
+                                                  binsize=binSizeInt,
                                                   shuffle=False)
         loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
