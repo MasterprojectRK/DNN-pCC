@@ -25,7 +25,7 @@ tf.random.set_seed(35)
                     type=click.Path(exists=True,readable=True,file_okay=False),
                     help="Path where chromatin factor data in bigwig format resides (training)")
 @click.option("--trainChromosomes", "-tchroms", required=True,
-              type=str, default="17", help="chromosome(s) to train on; separate multiple chromosomes by spaces")
+              type=str, help="chromosome(s) to train on; separate multiple chromosomes by spaces")
 @click.option("--validationMatrices", "-vm", required=True,
                     multiple=True,
                     type=click.Path(exists=True,dir_okay=False, readable=True),
@@ -47,44 +47,44 @@ tf.random.set_seed(35)
               type=click.Path(writable=True,dir_okay=False), 
               default="trainedModel.h5", help="path+filename for trained model")
 @click.option("--learningRate", "-lr", required=True,
-                type=click.FloatRange(min=1e-10), default=1e-1,
-                help="learning rate for stochastic gradient descent")
+                type=click.FloatRange(min=1e-10), default=1e-5,
+                help="learning rate for stochastic gradient descent. Default 1e-5.")
 @click.option("--numberEpochs", "-ep", required=True,
                 type=click.IntRange(min=2), default=1000,
-                help="number of epochs for training the neural network")
+                help="Number of epochs for training the neural network. Default 1000")
 @click.option("--batchsize", "-bs", required=True,
                 type=click.IntRange(min=5), default=30,
-                help="batch size for training the neural network")
+                help="Batch size for training the neural network. Default 30.")
 @click.option("--windowsize", "-ws", required=True,
                 type=click.IntRange(min=10), default=80,
                 help="Window size (in bins) for composing training data")
 @click.option("--scaleMatrix", "-scm", required=True,
                 type=bool, default=False,
-                help="Scale Hi-C matrix to [0...1]")
+                help="Scale Hi-C matrix to [0...1]. Default: False")
 @click.option("--clampFactors","-cfac", required=False,
                 type=bool, default=False,
-                help="Clamp outliers in chromatin factor data")
+                help="Clamp outliers in chromatin factor data. Default: False")
 @click.option("--scaleFactors","-scf", required=False,
                 type=bool, default=True,
                 help="Scale chromatin factor data to range 0...1 (recommended)")
 @click.option("--modelType", "-mod", required=False,
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
                 default="wider-longer",
-                help="Type of model to use")
+                help="Type of model to use. Default: wider-longer")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
                 default="SGD",
-                help="Optimizer to use (SGD, Adam, RMSprop or cosine similarity)")
+                help="Optimizer to use: SGD (default), Adam, RMSprop or cosine similarity.")
 @click.option("--loss", "-l", required=False,
                 type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
                 default="MSE",
-                help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity")
+                help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity. Default: MSE")
 @click.option("--earlyStopping", "-early",
                 required=False, type=click.IntRange(min=5),
-                help="patience for early stopping, stop after this number of epochs w/o improvement")
+                help="patience for early stopping, stop after this number of epochs w/o improvement in validation loss")
 @click.option("--debugState", "-dbs", 
-                required=False, type=click.Choice([None,0,10,100,1000]),
-                default=None, help="debug state for internal use during development")
+                required=False, type=click.Choice(["0","10","100","1000"]),
+                help="debug state for internal use during development")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -186,6 +186,9 @@ def training(trainmatrices,
     if sequencefile is not None:
         nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
     paramDict["nr_symbols"] = nr_symbols
+
+    if debugstate is not None:
+        debugstate = int(debugstate)
 
     #generators for training and validation data
     trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
