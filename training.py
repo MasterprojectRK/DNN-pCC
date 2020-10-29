@@ -153,7 +153,7 @@ def training(trainmatrix,
     model.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
     model.add(Dropout(0.1))
     model.add(Dense(nr_neurons4,activation="relu",kernel_regularizer="l2"))
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learningrate), 
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learningrate), 
                   loss=tf.keras.losses.MeanSquaredError())
     model.summary()
     
