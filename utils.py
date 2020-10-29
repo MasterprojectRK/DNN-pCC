@@ -67,8 +67,10 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
         print(e)
     if properFileType:
         chrom = pChromStr
-        if not chrom.startswith("chr"):
-            chrom = "chr" + pChromStr
+        if chrom not in bigwigFile.chroms():
+            msg = "Chromosome {:s} not present in bigwigfile {:s}"
+            msg = msg.format(chrom, pBigwigFileName)
+            raise SystemExit(msg)
         #compute signal values (stats) over resolution-sized bins
         chromsize = bigwigFile.chroms(chrom)
         chromStartList = list(range(0,chromsize,pBinSizeInt))
