@@ -110,6 +110,10 @@ def training(trainmatrices,
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
+    if debugstate is not None:
+        debugstate = int(debugstate)
+
+
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
     #from different cell lines
@@ -162,6 +166,18 @@ def training(trainmatrices,
     print("\nLoading Chromatin factors for validation")
     utils.loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList, pScaleFactors=scalefactors, pClampFactors=clampfactors)
     
+    if debugstate is not None:
+        for folder in trainChromFactorsDict:
+            for chrom in trainChromFactorsDict[folder]["data"]:
+                filename = "chromFactorStats_train_{:s}_{:s}.png".format(folder.replace("/","-"),chrom)
+                filename = os.path.join(outputpath,filename)
+                utils.plotChromatinFactorStats(trainChromFactorsDict[folder]["data"][chrom],filename)
+        for folder in validationChromFactorsDict:
+            for chrom in validationChromFactorsDict[folder]["data"] :
+                filename = "chromFactorStats_validation_{:s}_{:s}.png".format(folder.replace("/","-"),chrom)
+                filename = os.path.join(outputpath,filename)
+                utils.plotChromatinFactorStats(validationChromFactorsDict[folder]["data"][chrom],filename)
+
     #check if DNA sequences for all chroms are there and correspond with matrices/chromatin factors
     #do not load them in memory yet, only store paths and sequence ids in the dicts
     #the generator can then load sequence data as required
@@ -187,8 +203,6 @@ def training(trainmatrices,
         nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
     paramDict["nr_symbols"] = nr_symbols
 
-    if debugstate is not None:
-        debugstate = int(debugstate)
 
     #generators for training and validation data
     trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,

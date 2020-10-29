@@ -259,8 +259,8 @@ def plotChromatinFactorStats(pChromFactorArray, pFilename):
     #store box plots of the chromatin factors in the array
     fig1, ax1 = plt.subplots()
     toPlotList = []
-    for i in range(pChromFactorArray.shape[0]):
-        toPlotList.append(pChromFactorArray[i].flatten())
+    for i in range(pChromFactorArray.shape[1]):
+        toPlotList.append(pChromFactorArray[:,i])
     ax1.boxplot(toPlotList)
     ax1.set_title("Chromatin factor boxplots")
     ax1.set_xlabel("Chromatin factor number")
@@ -450,12 +450,15 @@ def loadChromatinFactorDataPerMatrix(pMatricesDict,pChromFactorsDict,pChromosome
             binnedChromFactorArray = np.empty(shape=(len(bigwigFileList),chromLength_bins))
             for i, bigwigFile in enumerate(bigwigFileList):
                 chromName_bigwig = pChromFactorsDict[fFolder]["bigwigs"][bigwigFile]["namePrefix"] + chrom
-                binnedFactor = binChromatinFactor(fFolder+bigwigFile, binsize, chromName_bigwig)
+                binnedFactor = binChromatinFactor(os.path.join(fFolder,bigwigFile), binsize, chromName_bigwig)
                 if pScaleFactors:
                     binnedFactor = scaleArray(binnedFactor)
                 if pClampFactors:
                     binnedFactor = clampArray(binnedFactor)
                 binnedChromFactorArray[i] = binnedFactor
+                msg = "{:s} - min {:.3f} - max {:.3f}"
+                msg = msg.format(bigwigFile, binnedChromFactorArray[i].min(), binnedChromFactorArray[i].max())
+                print(msg)
             dataPerChromDict[chromName_matrix] = np.transpose(binnedChromFactorArray) #use matrix chrom name for easier access later on        
         pChromFactorsDict[fFolder]["data"] = dataPerChromDict
 
