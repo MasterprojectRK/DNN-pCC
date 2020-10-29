@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+from matplotlib.ticker import MultipleLocator
 from tqdm import tqdm
 from scipy import sparse
 from Bio import SeqIO
@@ -239,33 +240,97 @@ def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
     return distNormalizedMatrix
 
-def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pPlotFilename=None, pClampArray=True, pScaleArray=True):
-    binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
-    ##bin the single proteins
-    for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
-        binnedFactor = binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr)
-        if pClampArray: #clamping outliers before scaling
-            binnedFactor = clampArray(binnedFactor)
-        if pScaleArray:
-            binnedFactor = scaleArray(binnedFactor)
-        binnedChromatinFactorArray[i] = binnedFactor
-    #print boxplots, if requested
-    if pPlotFilename is not None:
-        plotChromatinFactorStats(binnedChromatinFactorArray, pFilename=pPlotFilename)
-    #return the transpose
-    return np.transpose(binnedChromatinFactorArray)
+# def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pPlotFilename=None, pClampArray=True, pScaleArray=True):
+#     binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
+#     ##bin the single proteins
+#     for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
+#         binnedFactor = binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr)
+#         if pClampArray: #clamping outliers before scaling
+#             binnedFactor = clampArray(binnedFactor)
+#         if pScaleArray:
+#             binnedFactor = scaleArray(binnedFactor)
+#         binnedChromatinFactorArray[i] = binnedFactor
+#     #print boxplots, if requested
+#     if pPlotFilename is not None:
+#         plotChromatinFactors_boxplots(binnedChromatinFactorArray, pFilename=pPlotFilename)
+#     #return the transpose
+#     return np.transpose(binnedChromatinFactorArray)
 
-def plotChromatinFactorStats(pChromFactorArray, pFilename):
+def plotChromatinFactors(pFactorDict, pMatrixDict, pOutputPath, pPlotType, pFigureType="png"):
+    if pPlotType == "box":
+        plotFn = plotChromatinFactors_boxplots
+    elif pPlotType == "line":
+        plotFn = plotChromatinFactors_lineplots
+    else:
+        return
+    for folder in pFactorDict:
+        factorNames = [os.path.splitext(name)[0] for name in pFactorDict[folder]["bigwigs"]]
+        matrixName = pFactorDict[folder]["matrixName"]
+        binsize = pMatrixDict[matrixName]["binsize"]
+        for chrom in pFactorDict[folder]["data"]:
+            filename = "chromFactors_{:s}_{:s}_{:s}.{:s}".format(pPlotType, folder.rstrip("/").replace("/","-"), chrom, pFigureType)
+            filename = os.path.join(pOutputPath,filename)
+            plotTitle = "Chromosome {:s} | Dir. {:s}".format(chrom,folder)
+            plotFn(pChromFactorArray=pFactorDict[folder]["data"][chrom],
+                                            pFilename=filename, 
+                                            pBinSize=binsize,
+                                            pAxTitle=plotTitle, 
+                                            pFactorNames=factorNames)
+
+
+def plotChromatinFactors_boxplots(pChromFactorArray, pFilename, pBinSize=None, pAxTitle=None, pFactorNames=None):
     #store box plots of the chromatin factors in the array
     fig1, ax1 = plt.subplots()
     toPlotList = []
     for i in range(pChromFactorArray.shape[1]):
         toPlotList.append(pChromFactorArray[:,i])
     ax1.boxplot(toPlotList)
-    ax1.set_title("Chromatin factor boxplots")
-    ax1.set_xlabel("Chromatin factor number")
+    fig1.suptitle("Chromatin factor boxplots")
+    if pAxTitle is not None:
+        ax1.set_title(str(pAxTitle))
+    if pFactorNames is not None \
+            and isinstance(pFactorNames,list) \
+            and len(pFactorNames) == pChromFactorArray.shape[1]:
+        ax1.set_xticklabels(pFactorNames, rotation=90)
+    ax1.set_xlabel("Chromatin factor")
     ax1.set_ylabel("Chromatin factor signal value")
+    fig1.tight_layout()
     fig1.savefig(pFilename)
+
+def plotChromatinFactors_lineplots(pChromFactorArray, pFilename, pBinSize, pAxTitle=None, pFactorNames=None):
+    #plot chromatin factors
+    #for debugging purposes only, not for production use
+    winsize = pChromFactorArray.shape[0]
+    nr_subplots = pChromFactorArray.shape[1]
+    x_axis_values = np.arange(winsize) * pBinSize
+    fig1, axs1 = plt.subplots(nr_subplots, 1, sharex = True, figsize=(int(max(x_axis_values)/2000000),3*nr_subplots))
+    for i in range(nr_subplots):
+        axs1[i].plot(x_axis_values, pChromFactorArray[:,i])
+        axs1[i].grid(True)
+        #try to plot a reasonable number of major x-axis ticks
+        if max(x_axis_values) < 1000000:
+            locVal = 50000
+        elif max(x_axis_values) < 10000000:
+            locVal = 500000
+        elif max(x_axis_values) < 50000000:
+            locVal = 2500000
+        elif max(x_axis_values) < 100000000:
+            locVal = 5000000
+        else:
+            locVal = 10000000
+        axs1[i].xaxis.set_major_locator(MultipleLocator(locVal))
+        if pFactorNames is not None \
+                and isinstance(pFactorNames,list) \
+                and len(pFactorNames) == nr_subplots:
+            axs1[i].set_xlabel(pFactorNames[i])
+    if pAxTitle is not None:
+        fig1.text(0.5, 0.04, str(pAxTitle), ha='center')
+    axs1[0].set_xlim([min(x_axis_values), max(x_axis_values)])
+    fig1.tight_layout()
+    fig1.text(0.04, 0.5, 'signal value', va='center', rotation='vertical')
+    fig1.suptitle("Chromatin factors")
+    fig1.savefig(pFilename)
+
 
 def clampArray(pArray):
     #clamp all values array to be within 
@@ -624,23 +689,6 @@ def getCheckSequences(pMatrixDict, pFactorsDict, pSequenceFile):
     for mName in pMatrixDict:
         pMatrixDict[mName]["seqSymbols"] = sorted(list(symbolsSet))
         pFactorsDict[folderName]["seqSymbols"] = sorted(list(symbolsSet))
-
-
-def plotChromatinFactors(pChromSequenceArray, pBinSize, pChrom, pFolder, pFilename):
-    #plot chromatin factors
-    #for debugging purposes only, not for production use
-    winsize = pChromSequenceArray.shape[0]
-    nr_subplots = pChromSequenceArray.shape[1]
-    x_axis_values = np.arange(winsize) * pBinSize
-    fig1, axs1 = plt.subplots(nr_subplots, 1, sharex = True)
-    for i in range(nr_subplots):
-        axs1[i].plot(x_axis_values, pChromSequenceArray[:,i])
-        axs1[i].grid(True)
-    axs1[0].set_ylabel("signal val.")    
-    axs1[0].set_xlabel("chromosome" + str(pChrom))
-    axs1[0].set_title("chrom. factors from " + str(pFolder) + " chrom " + str(pChrom))
-    fig1.savefig(pFilename)
-
 
 def computePearsonCorrelation(pCoolerFile1, pCoolerFile2, 
                               pWindowsize_bp,

@@ -170,16 +170,17 @@ def training(trainmatrices,
     utils.loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList, pScaleFactors=scalefactors, pClampFactors=clampfactors)
     
     if debugstate is not None:
-        for folder in trainChromFactorsDict:
-            for chrom in trainChromFactorsDict[folder]["data"]:
-                filename = "chromFactorStats_train_{:s}_{:s}.png".format(folder.replace("/","-"),chrom)
-                filename = os.path.join(outputpath,filename)
-                utils.plotChromatinFactorStats(trainChromFactorsDict[folder]["data"][chrom],filename)
-        for folder in validationChromFactorsDict:
-            for chrom in validationChromFactorsDict[folder]["data"] :
-                filename = "chromFactorStats_validation_{:s}_{:s}.png".format(folder.replace("/","-"),chrom)
-                filename = os.path.join(outputpath,filename)
-                utils.plotChromatinFactorStats(validationChromFactorsDict[folder]["data"][chrom],filename)
+        for plotType in ["box", "line"]:
+            utils.plotChromatinFactors(pFactorDict=trainChromFactorsDict,
+                                        pMatrixDict=trainMatricesDict,
+                                        pOutputPath=outputpath,
+                                        pPlotType=plotType,
+                                        pFigureType=figuretype)
+            utils.plotChromatinFactors(pFactorDict=validationChromFactorsDict,
+                                        pMatrixDict=validationMatricesDict,
+                                        pOutputPath=outputpath,
+                                        pPlotType=plotType,
+                                        pFigureType=figuretype)
 
     #check if DNA sequences for all chroms are there and correspond with matrices/chromatin factors
     #do not load them in memory yet, only store paths and sequence ids in the dicts
