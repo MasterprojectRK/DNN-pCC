@@ -280,9 +280,15 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                 if self.sequencePresent == True:
                     sequenceArray[b+indOffset] = self.__checkGetDNAsequence(currentFolderUpper, currentChromUpper, ind)
         if matrixArray is not None:
-            return [chromatinFactorArray], matrixArray
+            if self.sequencePresent == True:
+                return [chromatinFactorArray, sequenceArray], matrixArray
+            else:
+                return [chromatinFactorArray], matrixArray
         else:
-            return chromatinFactorArray
+            if self.sequencePresent == True:
+                return [chromatinFactorArray, sequenceArray]
+            else:
+                return chromatinFactorArray
 
     def on_epoch_end(self):
         if self.shuffle == True:
