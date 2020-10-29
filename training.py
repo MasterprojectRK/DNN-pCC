@@ -83,7 +83,7 @@ tf.random.set_seed(35)
                 required=False, type=click.IntRange(min=5),
                 help="patience for early stopping, stop after this number of epochs w/o improvement in validation loss")
 @click.option("--debugState", "-dbs", 
-                required=False, type=click.Choice(["0","10","100","1000"]),
+                required=False, type=click.Choice(["0","10","100","1000","Figures"]),
                 help="debug state for internal use during development")
 @click.option("--figureType", type=click.Choice(["png","svg","pdf"]),
                 required=False, default="png")
@@ -113,7 +113,7 @@ def training(trainmatrices,
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
-    if debugstate is not None:
+    if debugstate is not None and debugstate != "Figures":
         debugstate = int(debugstate)
 
 
