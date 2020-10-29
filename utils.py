@@ -22,6 +22,7 @@ def getBigwigFileList(pDirectory):
     return retList
 
 def getChromSizesFromBigwig(pBigwigFileName):
+    #returns the chrom sizes from a bigwig file in form of a dict
     chromSizeDict = dict()
     try:
         bigwigFile = pyBigWig.open(pBigwigFileName)
@@ -32,9 +33,8 @@ def getChromSizesFromBigwig(pBigwigFileName):
         print(e) 
     return chromSizeDict
          
-
 def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
-    #returns sparse matrix from cooler file for given chromosome name
+    #returns sparse csr matrix from cooler file for given chromosome name
     sparseMatrix = None
     binSizeInt = 0
     try:
@@ -46,8 +46,8 @@ def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
         print(e)
     return sparseMatrix, binSizeInt
 
-
 def getChromSizesFromCooler(pCoolerFilePath):
+    #get the sizes of the chromosomes present in a cooler matrix
     chromSizes = dict()
     try:
         coolerMatrix = cooler.Cooler(pCoolerFilePath) 
@@ -55,7 +55,6 @@ def getChromSizesFromCooler(pCoolerFilePath):
     except Exception as e:
         print(e)
     return chromSizes
-
 
 def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
     #bin chromatin factor loaded from bigwig file pBigwigFileName with bin size pBinSizeInt for chromosome pChromStr
@@ -92,7 +91,7 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
     return binArray
 
 def scaleArray(pArray):
-    # min-max scaling (0...1) for 1D arrays 
+    # min-max scaling (0...1) for numpy arrays 
     if pArray is None or pArray.size == 0:
         msg = "cannot normalize empty array"
         print(msg)
@@ -105,10 +104,9 @@ def scaleArray(pArray):
         normArray = np.zeros_like(pArray)
     return normArray
 
-
 def showMatrix(pMatrix):
     #test function to show matrices
-    #not for production use
+    #debug only, not for production use
     print(pMatrix.max())
     plotmatrix = pMatrix + 1
     plt.matshow(plotmatrix, cmap="Reds", norm=colors.LogNorm())
@@ -116,7 +114,7 @@ def showMatrix(pMatrix):
 
 def plotMatrix(pMatrix, pFilename, pTitle):
     #test function to plot matrices
-    #not for production use
+    #debug only, not for production use
     fig1, ax1 = plt.subplots()
     cs = ax1.matshow(pMatrix, cmap="RdYlBu_r", norm=colors.LogNorm())
     ax1.set_title(str(pTitle))
@@ -124,6 +122,7 @@ def plotMatrix(pMatrix, pFilename, pTitle):
     fig1.savefig(pFilename)
 
 def plotHistory(pKerasHistoryObject, pFilename):
+    #plot loss and validation loss over epoch numbers
     fig1, ax1 = plt.subplots(figsize=(6,4.5))
     nr_epochs = len(pKerasHistoryObject.history['loss'])
     x_vals = np.arange(nr_epochs) + 1
@@ -154,7 +153,6 @@ def plotHistory(pKerasHistoryObject, pFilename):
     ax1.grid(True, which="both")
     ax1.legend(['train', 'val'], loc='upper left')
     fig1.savefig(pFilename)
-
 
 def rebuildMatrix(pArrayOfTriangles, pWindowSize):
     #rebuilds the interaction matrix (a trapezoid along its diagonal)
@@ -262,23 +260,9 @@ def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
     return distNormalizedMatrix
 
-# def composeChromatinFactors(pBigwigFileList, pChromLength_bins, pBinSizeInt, pChromosomeStr, pPlotFilename=None, pClampArray=True, pScaleArray=True):
-#     binnedChromatinFactorArray = np.empty(shape=(len(pBigwigFileList),pChromLength_bins))
-#     ##bin the single proteins
-#     for i in tqdm(range(len(pBigwigFileList)),desc="binning chromatin factors"):
-#         binnedFactor = binChromatinFactor(pBigwigFileList[i],pBinSizeInt,pChromosomeStr)
-#         if pClampArray: #clamping outliers before scaling
-#             binnedFactor = clampArray(binnedFactor)
-#         if pScaleArray:
-#             binnedFactor = scaleArray(binnedFactor)
-#         binnedChromatinFactorArray[i] = binnedFactor
-#     #print boxplots, if requested
-#     if pPlotFilename is not None:
-#         plotChromatinFactors_boxplots(binnedChromatinFactorArray, pFilename=pPlotFilename)
-#     #return the transpose
-#     return np.transpose(binnedChromatinFactorArray)
-
 def plotChromatinFactors(pFactorDict, pMatrixDict, pOutputPath, pPlotType, pFigureType="png"):
+    #plot box- or line plots of the chromatin factors stored in pFactorDict
+    #the matrices are required to determine the binsize for the line plots
     if pPlotType == "box":
         plotFn = plotChromatinFactors_boxplots
     elif pPlotType == "line":
@@ -298,7 +282,6 @@ def plotChromatinFactors(pFactorDict, pMatrixDict, pOutputPath, pPlotType, pFigu
                                             pBinSize=binsize,
                                             pAxTitle=plotTitle, 
                                             pFactorNames=factorNames)
-
 
 def plotChromatinFactors_boxplots(pChromFactorArray, pFilename, pBinSize=None, pAxTitle=None, pFactorNames=None):
     #store box plots of the chromatin factors in the array
@@ -320,7 +303,7 @@ def plotChromatinFactors_boxplots(pChromFactorArray, pFilename, pBinSize=None, p
     fig1.savefig(pFilename)
 
 def plotChromatinFactors_lineplots(pChromFactorArray, pFilename, pBinSize, pAxTitle=None, pFactorNames=None):
-    #plot chromatin factors
+    #plot chromatin factors line plots
     #for debugging purposes only, not for production use
     winsize = pChromFactorArray.shape[0]
     nr_subplots = pChromFactorArray.shape[1]
@@ -353,9 +336,8 @@ def plotChromatinFactors_lineplots(pChromFactorArray, pFilename, pBinSize, pAxTi
     fig1.suptitle("Chromatin factors")
     fig1.savefig(pFilename)
 
-
 def clampArray(pArray):
-    #clamp all values array to be within 
+    #clamp all values in pArray to be within 
     #lowerQuartile - 1.5xInterquartile ... upperQuartile + 1.5xInterquartile
     clampedArray = pArray.copy()
     upperQuartile = np.quantile(pArray,0.75)
@@ -368,26 +350,8 @@ def clampArray(pArray):
         clampedArray[clampedArray > upperClampingBound] = upperClampingBound
     return clampedArray
 
-
-def readSequences(pDNAFastaFileStr):
-    sequenceStr = ""
-    try:
-        with open(pDNAFastaFileStr) as handle:
-            for record in SeqIO.parse(handle, "fasta"):
-                sequenceStr += str(record.seq.upper())
-    except Exception as e:
-        msg = "Could not read fasta file {:s}\n"
-        msg += str(e)
-        msg = msg.format(pDNAFastaFileStr)
-        print(msg)
-    if len(sequenceStr) > 0:
-        msg = "Successfully read sequence of total length {:d}\n"
-        msg += "from file {:s}."
-        msg = msg.format(len(sequenceStr), pDNAFastaFileStr)
-        print(msg)
-    return sequenceStr
-
 def readSequencesPerId(pDNAFastaFileStr, pIdentifier):
+    #read DNA sequence from a Fasta file based using its record identifier
     sequenceStr = ""
     try:
         seqDict = SeqIO.index(pDNAFastaFileStr,"fasta")
@@ -400,6 +364,7 @@ def readSequencesPerId(pDNAFastaFileStr, pIdentifier):
     return sequenceStr
 
 def encodeSequence(pSequenceStr):
+    #one-hot encoding for DNA sequences
     if pSequenceStr is None or pSequenceStr == "":
         msg = "Aborting. DNA sequence is empty"
         raise SystemExit(msg)
@@ -413,6 +378,8 @@ def encodeSequence(pSequenceStr):
     return encodedSequenceArray
 
 def fillEncodedSequence(pEncodedSequenceArray, pBinSizeInt):
+    #fill one-hot encoded sequence array with zero vectors such that
+    #the length matches the number of bins
     actualLengthInt = pEncodedSequenceArray.shape[0] #here, length in basepairs
     targetLengthInt = int(np.ceil(actualLengthInt/pBinSizeInt))*pBinSizeInt #in basepairs
     returnArray = None
@@ -429,13 +396,6 @@ def fillEncodedSequence(pEncodedSequenceArray, pBinSizeInt):
         print(msg)
         returnArray = pEncodedSequenceArray
     return returnArray
-
-def buildSequenceArray(pDNAFastaFileStr, pBinSizeInt):
-    sequenceStr = readSequences(pDNAFastaFileStr)
-    sequenceArr = encodeSequence(sequenceStr)
-    sequenceArr = fillEncodedSequence(sequenceArr,pBinSizeInt)
-    return sequenceArr
-
 
 def checkGetChromsPresentInMatrices(pTrainmatricesList, pChromNameList):
     matrixDict = dict()
@@ -717,6 +677,25 @@ def computePearsonCorrelation(pCoolerFile1, pCoolerFile2,
                               pModelChromList, pTargetChromStr,
                               pModelCellLineList, pTargetCellLineStr,
                               pPlotOutputFile=None, pCsvOutputFile=None):
+    '''
+    compute distance-stratified pearson correlation for target chromosome
+    directly from cooler files and plot or write to file
+
+    Parameters:
+        pCoolerFile1 (str): Path to cooler file 1
+        pCoolerFile2 (str): Path to cooler file 2
+        pWindowsize_bp (int): Windowsize in basepairs for which correlations shall be computed
+        pModelChromList (list): List of strings, will appear in plot title
+        pModelCellLineList (list): List of strings, will appear in plot title
+        pTargetChromStr (str): the target chromosome, e.g. >chr10< or >10<
+        pTargetCellLineStr (str): the target cell line, will appear in plot title
+        pPlotOutputFile (str): filename of correlation plot
+        pCsvOutputFile (str): filename of correlation csv file
+    
+    Returns:
+        None
+    ''' 
+
     sparseMatrix1, binsize1 = getMatrixFromCooler(pCoolerFile1, pTargetChromStr)
     sparseMatrix2, binsize2 = getMatrixFromCooler(pCoolerFile2, pTargetChromStr)
     errorMsg = ""
@@ -752,11 +731,26 @@ def computePearsonCorrelation(pCoolerFile1, pCoolerFile2,
                                  pMethod="pearson")
     return resultsDf
 
-
-
-def computePearsonCorrelationSparse(pSparseCsrMatrix1, pSparseCsrMatrix2, pBinsize, pWindowsize_bp, 
+def computePearsonCorrelationSparse(pSparseCsrMatrix1, pSparseCsrMatrix2, 
+                                    pBinsize, pWindowsize_bp, 
                                     pModelChromList, pTargetChromStr, 
                                     pModelCellLineList, pTargetCellLineStr):
+    '''
+    compute distance-stratified Pearson correlation from two sparse matrices
+
+    Parameters:
+        pSparseCsrMatrix1 (scipy.sparse.csr_matrix): sparse csr matrix 1
+        pSparseCsrMatrix2 (scipy.sparse.csr_matrix): sparse csr matrix 2
+        pBinsize (int): the binsize of each bin in the sparse matrices
+        pWindowsize_bp (int): the windowsize in basepairs for which correlations shall be computed
+        pModelChromList (list): list of strings, will appear in plot title
+        pTargetChromStr (str): the target chromosome, e.g. >chr10< or >10<
+        pTargetCellLineStr (str): the target cell line, will appear in plot title
+        pModelCellLineList (list): List of strings, will appear in plot title
+
+    Returns:
+        (pandas.DataFrame): Pandas dataframe containing the correlations per distance 
+    '''
     numberOfDiagonals = int(np.round(pWindowsize_bp/pBinsize))
     if numberOfDiagonals < 1:
         msg = "Window size must be larger than bin size of matrices.\n"
@@ -823,6 +817,7 @@ def computePearsonCorrelationSparse(pSparseCsrMatrix1, pSparseCsrMatrix2, pBinsi
     return resultsDf
     
 def plotPearsonCorrelationDf(pResultsDfList, pLegendList, pOutfile, pMethod="pearson"):
+    #helper function to plot distance-stratified Pearson correlation stored in pandas dataframes
     if pMethod not in ["pearson", "spearman"]:
         print("plotting only supported for 'pearson' and 'spearman' correlation methods")
         return
@@ -893,7 +888,6 @@ def plotPearsonCorrelationDf(pResultsDfList, pLegendList, pOutfile, pMethod="pea
             print(msg)
         fig1.savefig(outfile)
 
-
 def maskFunc(pArray, pWindowSize=0):
     #mask a trapezoid along the (main) diagonal of a 2D array
     #this code is copied from the study project by Ralf Krauth
@@ -913,7 +907,19 @@ def getCorrelation(pData, pDistanceField, pTargetField, pPredictionField, pCorrM
     https://github.com/abajorat/HiCPrediction/blob/master/hicprediction/predict.py
     It has been adapted by Ralf Krauth during his study project:
     https://github.com/MasterprojectRK/HiCPrediction/blob/master/hicprediction/predict.py
+    
+    Parameters:
+        pData (pandas.DataFrame): Pandas dataframe with read counts / distances
+        pDistanceField (str): the column name of the distance Field in the dataframe
+        pTargetField (str): the column name of the target read counts in the dataframe
+        pPredictionField (str): column name of the predicted read counts in the dataframe
+        pCorrMethod (str): any of the correlation methods supported by pandas DataFrame corr method
+    
+    Returns:
+        indices (list): integer list of index values 
+        values (list): float list of correlation values
     """
+
     new = pData.groupby(pDistanceField, group_keys=False)[[pTargetField,
         pPredictionField]].corr(method=pCorrMethod)
     new = new.iloc[0::2,-1]
