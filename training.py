@@ -311,7 +311,7 @@ def training(trainmatrices,
     #plot train- and validation loss over epochs
     lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
     lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
-    utils.plotLoss(history, lossPlotFilename)
+    utils.plotHistory(history, lossPlotFilename)
 
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
