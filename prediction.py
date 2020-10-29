@@ -60,8 +60,8 @@ def prediction(validationmatrix,
         windowsize = int(trainParamDict["windowsize"])
         binSizeInt = int(trainParamDict["binSize"])
         batchSizeInt = int(trainParamDict["batchsize"])
-        clampfactors = bool(trainParamDict["clampfactors"])
-        scalefactors = bool(trainParamDict["scalefactors"])
+        clampfactors = trainParamDict["clampfactors"] == True
+        scalefactors = trainParamDict["scalefactors"] == True
         trainmatshape = ast.literal_eval(trainParamDict["train_matrix_shape"])
         #for now, only allow same chrom length as in training
         chromLength_bins = int(trainmatshape[0])
