@@ -162,7 +162,10 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
-        self.debugState = debugState
+        try: 
+            self.debugState = int(debugState)
+        except:
+            self.debugState = None
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
         self.chromNames = []
