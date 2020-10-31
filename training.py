@@ -288,8 +288,8 @@ def training(trainmatrices,
 
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = nr_samples * 20 #every twenty batches
-    checkpointFilename = outputpath + "checkpoint_{epoch:05d}.h5"
+    saveFreqInt = int(nr_samples / batchsize * 50) #every fifty batches
+    checkpointFilename = os.path.join(outputpath, "checkpoint_{epoch:05d}.h5")
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
                                                         save_freq=saveFreqInt)
