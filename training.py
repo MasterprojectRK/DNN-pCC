@@ -1,7 +1,7 @@
 #!python3
 import utils
 import models
-import testRecords
+import records
 import click
 import tensorflow as tf
 import numpy as np
@@ -243,13 +243,13 @@ def training(trainmatrices,
     trainFilenameList = [os.path.join(outputpath, x) for x in trainFilenameList]
     nr_samples = 0
     for i, batch in enumerate(tqdm(trainDataGenerator,desc="generating training data")):
-        testRecords.writeTFRecord(batch[0][0], batch[1], trainFilenameList[i])
+        records.writeTFRecord(batch[0][0], batch[1], trainFilenameList[i])
         nr_samples += batch[1].shape[0]
     #write the validation data to disk as tfRecord
     validationFilenameList = ["validationfile_{:03d}.tfrecord".format(i+1) for i in range(len(validationDataGenerator))]
     validationFilenameList = [os.path.join(outputpath, x) for x in validationFilenameList]
     for i, batch in enumerate(tqdm(validationDataGenerator, desc="generating validation data")):
-        testRecords.writeTFRecord(batch[0][0], batch[1], validationFilenameList[i])
+        records.writeTFRecord(batch[0][0], batch[1], validationFilenameList[i])
 
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
@@ -320,14 +320,14 @@ def training(trainmatrices,
     tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
     #build input streams
-    shuffleBufferSize = 3000
+    shuffleBufferSize = 3*recordsize
     shape = (3*windowsize,nr_factors)
     trainDs = tf.data.TFRecordDataset(trainFilenameList)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
-    trainDs = trainDs.map(lambda x: testRecords._parse_function(x, shape))
+    trainDs = trainDs.map(lambda x: records.parse_function(x, shape))
     trainDs = trainDs.batch(batchsize)
     validationDs = tf.data.TFRecordDataset(validationFilenameList)
-    validationDs = validationDs.map(lambda x: testRecords._parse_function(x, shape))
+    validationDs = validationDs.map(lambda x: records.parse_function(x, shape))
     validationDs = validationDs.batch(batchsize)
 
     #train the neural network
