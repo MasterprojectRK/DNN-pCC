@@ -1,15 +1,11 @@
-#!python3
 import utils
 import models
 import records
 import click
 import tensorflow as tf
 import numpy as np
-from scipy.stats import pearsonr
 import csv
 import os
-from Bio import SeqIO
-
 from tqdm import tqdm
 
 from numpy.random import seed
@@ -308,7 +304,7 @@ def training(trainmatrices,
     #save the training parameters to a file before starting to train
     #(allows recovering the parameters even if training is aborted
     # and only intermediate models are available)
-    parameterFile = outputpath + "trainParams.csv"    
+    parameterFile = os.path.join(outputpath, "trainParams.csv")    
     with open(parameterFile, "w") as csvfile:
         dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(paramDict.keys())))
         dictWriter.writeheader()
