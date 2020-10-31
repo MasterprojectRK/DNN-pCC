@@ -1,6 +1,7 @@
 #!python3
 import utils
 import models
+import testRecords
 import click
 import tensorflow as tf
 import numpy as np
@@ -45,39 +46,50 @@ tf.random.set_seed(35)
                     help="Output path where trained network will be stored")
 @click.option("--modelfilepath", "-mfp", required=True, 
               type=click.Path(writable=True,dir_okay=False), 
-              default="trainedModel.h5", help="path+filename for trained model")
+              default="trainedModel.h5", show_default=True, 
+              help="path+filename for trained model")
 @click.option("--learningRate", "-lr", required=True,
-                type=click.FloatRange(min=1e-10), default=1e-5,
-                help="learning rate for stochastic gradient descent. Default 1e-5.")
+                type=click.FloatRange(min=1e-10), 
+                default=1e-5, show_default=True,
+                help="learning rate for stochastic gradient descent")
 @click.option("--numberEpochs", "-ep", required=True,
-                type=click.IntRange(min=2), default=1000,
-                help="Number of epochs for training the neural network. Default 1000")
+                type=click.IntRange(min=2), 
+                default=1000, show_default=True,
+                help="Number of epochs for training the neural network.")
 @click.option("--batchsize", "-bs", required=True,
-                type=click.IntRange(min=5), default=30,
-                help="Batch size for training the neural network. Default 30.")
+                type=click.IntRange(min=5), 
+                default=256, show_default=True,
+                help="Batch size for training the neural network.")
+@click.option("--recordsize", "-rs", required=False,
+                type=click.IntRange(min=1000), 
+                default=2000, show_default=True,
+                help="size for training/validation data records")
 @click.option("--windowsize", "-ws", required=True,
-                type=click.IntRange(min=10), default=80,
+                type=click.IntRange(min=10), 
+                default=80, show_default=True,
                 help="Window size (in bins) for composing training data")
 @click.option("--scaleMatrix", "-scm", required=True,
-                type=bool, default=False,
+                type=bool, 
+                default=False, show_default=True,
                 help="Scale Hi-C matrix to [0...1]. Default: False")
 @click.option("--clampFactors","-cfac", required=False,
-                type=bool, default=False,
+                type=bool, 
+                default=False, show_default=True,
                 help="Clamp outliers in chromatin factor data. Default: False")
 @click.option("--scaleFactors","-scf", required=False,
                 type=bool, default=True,
                 help="Scale chromatin factor data to range 0...1 (recommended)")
 @click.option("--modelType", "-mod", required=False,
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
-                default="wider-longer",
+                default="initial", show_default=True,
                 help="Type of model to use. Default: wider-longer")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
-                default="SGD",
+                default="SGD", show_default=True,
                 help="Optimizer to use: SGD (default), Adam, RMSprop or cosine similarity.")
 @click.option("--loss", "-l", required=False,
                 type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
-                default="MSE",
+                default="MSE", show_default=True,
                 help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity. Default: MSE")
 @click.option("--earlyStopping", "-early",
                 required=False, type=click.IntRange(min=5),
@@ -86,7 +98,8 @@ tf.random.set_seed(35)
                 required=False, type=click.Choice(["0","10","100","1000","Figures"]),
                 help="debug state for internal use during development")
 @click.option("--figureType", type=click.Choice(["png","svg","pdf"]),
-                required=False, default="png")
+                required=False, 
+                default="png", show_default=True)
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -100,6 +113,7 @@ def training(trainmatrices,
             learningrate,
             numberepochs,
             batchsize,
+            recordsize,
             windowsize,
             scalematrix,
             clampfactors,
@@ -211,18 +225,31 @@ def training(trainmatrices,
     #generators for training and validation data
     trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
                                                         factorDict=trainChromFactorsDict,
-                                                        batchsize=batchsize,
+                                                        batchsize=recordsize,
                                                         windowsize=windowsize,
                                                         binsize=binsize,
-                                                        shuffle=True,
+                                                        shuffle=False, #done in dataset
                                                         debugState=debugstate)
     validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
                                                         factorDict=validationChromFactorsDict,
-                                                        batchsize=batchsize,
+                                                        batchsize=recordsize,
                                                         windowsize=windowsize,
                                                         binsize=binsize,
                                                         shuffle=False,
                                                         debugState=debugstate)    
+
+    #write the training data to disk as tfRecord
+    trainFilenameList = ["trainfile_{:03d}.tfrecord".format(i+1) for i in range(len(trainDataGenerator))]
+    trainFilenameList = [os.path.join(outputpath, x) for x in trainFilenameList]
+    nr_samples = 0
+    for i, batch in enumerate(tqdm(trainDataGenerator,desc="generating training data")):
+        testRecords.writeTFRecord(batch[0][0], batch[1], trainFilenameList[i])
+        nr_samples += batch[1].shape[0]
+    #write the validation data to disk as tfRecord
+    validationFilenameList = ["validationfile_{:03d}.tfrecord".format(i+1) for i in range(len(validationDataGenerator))]
+    validationFilenameList = [os.path.join(outputpath, x) for x in validationFilenameList]
+    for i, batch in enumerate(tqdm(validationDataGenerator, desc="generating validation data")):
+        testRecords.writeTFRecord(batch[0][0], batch[1], validationFilenameList[i])
 
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
@@ -261,7 +288,7 @@ def training(trainmatrices,
 
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = len(trainDataGenerator) * 20 #every twenty batches
+    saveFreqInt = nr_samples * 20 #every twenty batches
     checkpointFilename = outputpath + "checkpoint_{epoch:05d}.h5"
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
@@ -292,18 +319,22 @@ def training(trainmatrices,
     modelPlotName = os.path.join(outputpath, modelPlotName)
     tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
-    #don't shuffle when sequencefile present
-    #to avoid reloading sequences
-    shuffle = (sequencefile is None)
-    #shuffle = False
+    #build input streams
+    shuffleBufferSize = 3000
+    shape = (3*windowsize,nr_factors)
+    trainDs = tf.data.TFRecordDataset(trainFilenameList)
+    trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
+    trainDs = trainDs.map(lambda x: testRecords._parse_function(x, shape))
+    trainDs = trainDs.batch(batchsize)
+    validationDs = tf.data.TFRecordDataset(validationFilenameList)
+    validationDs = validationDs.map(lambda x: testRecords._parse_function(x, shape))
+    validationDs = validationDs.batch(batchsize)
 
     #train the neural network
-    history = model.fit(trainDataGenerator,
-              shuffle=shuffle,
+    history = model.fit(trainDs,
               epochs= numberepochs,
-              validation_data= validationDataGenerator,
-              callbacks=callback_fns,
-              workers=20
+              validation_data=validationDs,
+              callbacks=callback_fns
             )
 
     #store the trained network
@@ -314,6 +345,14 @@ def training(trainmatrices,
     lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
     utils.plotHistory(history, lossPlotFilename)
 
+    #delete train- and validation records, if debugstate not set
+    if debugstate is None or debugstate=="Figures":
+        for trainfile in tqdm(trainFilenameList, desc="Deleting training record files"):
+            if os.path.exists(trainfile):
+                os.remove(trainfile)
+        for validationfile in tqdm(validationFilenameList, desc="Deleting validation record files"):
+            if os.path.exists(validationfile):
+                os.remove(validationfile)
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
     modeltypeStr = pModelTypeStr
