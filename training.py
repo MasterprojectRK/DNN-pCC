@@ -95,7 +95,10 @@ tf.random.set_seed(35)
                 help="debug state for internal use during development")
 @click.option("--figureType", type=click.Choice(["png","svg","pdf"]),
                 required=False, 
-                default="png", show_default=True)
+@click.option("--saveFreq", "-sfreq",
+                required=False,type=click.IntRange(min=1, max=1000),
+                default=50, show_default=True,
+                help="Save the trained model every sfreq batches (1<=sfreq<=1000)")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -119,7 +122,8 @@ def training(trainmatrices,
             loss,
             earlystopping,
             debugstate,
-            figuretype):
+            figuretype,
+            savefreq):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -284,7 +288,7 @@ def training(trainmatrices,
 
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = int(nr_samples / batchsize * 50) #every fifty batches
+    saveFreqInt = int(np.ceil(nr_samples / batchsize) * savefreq)
     checkpointFilename = os.path.join(outputpath, "checkpoint_{epoch:05d}.h5")
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
