@@ -133,6 +133,34 @@ def training(trainmatrices,
     if debugstate is not None and debugstate != "Figures":
         debugstate = int(debugstate)
 
+    # f = np.arange(10*240*12).reshape(10,240,12).astype("float64")
+    # m = np.arange(10*3240).reshape(10,3240).astype("float64")
+    # dna = np.round(np.random.rand(10*2000000*5).reshape(10,2000000,5),0).astype("uint8")
+    # records.writeTFRecord(f,dna,m,"test.tfRecord")
+
+    # shapeDict = {"feats": f.shape[1:], "targs": m.shape[1:], "dna": dna.shape[1:]}
+    # #shapeDict = {"feats": f.shape[1:], "targs": m.shape[1:]}
+    # tds = tf.data.TFRecordDataset("test.tfRecord")
+    # tds = tds.map(lambda x: records.parse_function(x, shapeDict))
+    # tds = tds.batch(1)
+    # l = list(tds.take(1).as_numpy_iterator())
+    # feats0 = l[0][0]["feats"]
+    # print(feats0)
+    # print("shape", feats0.shape)
+    # print(f[0])
+    # dna0 = l[0][0]["dna"]
+    # print(dna0)
+    # print("shape", dna0.shape)
+    # print(dna[0])
+    # print(dna0.dtype)
+    # print("len", len(l))
+    # print("len0", len(l[0]))
+    # print("len0-0", len(l[0][0]))
+    # print("len0-1", len(l[0][1]))
+    # tg = l[0][1][0]
+    # print(tg)
+    # print(tg.shape)
+    # print(m[0])
 
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
@@ -246,14 +274,19 @@ def training(trainmatrices,
     trainFilenameList = [os.path.join(outputpath, x) for x in trainFilenameList]
     nr_samples = 0
     for i, batch in enumerate(tqdm(trainDataGenerator,desc="generating training data")):
-        records.writeTFRecord(batch[0][0], batch[1], trainFilenameList[i])
+        if len(batch[0]) == 1:
+            records.writeTFRecord(batch[0][0], None, batch[1], trainFilenameList[i])
+        else:
+            records.writeTFRecord(batch[0][0], batch[0][1], batch[1], trainFilenameList[i])
         nr_samples += batch[1].shape[0]
     #write the validation data to disk as tfRecord
     validationFilenameList = ["validationfile_{:03d}.tfrecord".format(i+1) for i in range(len(validationDataGenerator))]
     validationFilenameList = [os.path.join(outputpath, x) for x in validationFilenameList]
     for i, batch in enumerate(tqdm(validationDataGenerator, desc="generating validation data")):
-        records.writeTFRecord(batch[0][0], batch[1], validationFilenameList[i])
-
+        if len(batch[0]) == 1:
+            records.writeTFRecord(batch[0][0], None, batch[1], validationFilenameList[i])
+        else:
+            records.writeTFRecord(batch[0][0], batch[0][1], batch[1], validationFilenameList[i])
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
@@ -324,13 +357,17 @@ def training(trainmatrices,
     
     #build input streams
     shuffleBufferSize = 3*recordsize
-    shape = (3*windowsize,nr_factors)
+    shapeDict = dict()
+    shapeDict["feats"] = (3*windowsize,nr_factors)
+    shapeDict["targs"] = ( int(windowsize*(windowsize+1)/2), )
+    if sequencefile is not None:
+        shapeDict["dna"] = (windowsize*binsize,nr_symbols)
     trainDs = tf.data.TFRecordDataset(trainFilenameList)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
-    trainDs = trainDs.map(lambda x: records.parse_function(x, shape))
+    trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict))
     trainDs = trainDs.batch(batchsize)
     validationDs = tf.data.TFRecordDataset(validationFilenameList)
-    validationDs = validationDs.map(lambda x: records.parse_function(x, shape))
+    validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict))
     validationDs = validationDs.batch(batchsize)
 
     #train the neural network
