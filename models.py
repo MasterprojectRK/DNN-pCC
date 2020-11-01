@@ -215,7 +215,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
             matrixArray = np.empty((len(globalIndices), int(self.windowsize*(self.windowsize + 1)/2)))
         sequenceArray = None
         if self.sequencePresent:
-            sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)))
+            sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)), dtype=np.uint8)
         #find the correct global -> local mapping for of the first and last global index in the batch
         indBreakpoints = [bp for bp in self.globalIndexMapping]
         lowerMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[0])
