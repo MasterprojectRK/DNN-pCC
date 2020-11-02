@@ -331,7 +331,9 @@ def training(trainmatrices,
     shapeDict["targs"] = ( int(windowsize*(windowsize+1)/2), )
     if sequencefile is not None:
         shapeDict["dna"] = (windowsize*binsize,nr_symbols)
-    trainDs = tf.data.TFRecordDataset(trainFilenameList)
+    trainDs = tf.data.TFRecordDataset(trainFilenameList, 
+                                        num_parallel_reads=tf.data.experimental.AUTOTUNE,
+                                        compression_type="GZIP")
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict))
     trainDs = trainDs.batch(batchsize)

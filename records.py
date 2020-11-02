@@ -81,7 +81,7 @@ def writeTFRecord(pChromFactorsArray, pDNASequenceArray, pTargetMatricesArray, p
         print(msg)
         return
     
-    with tf.io.TFRecordWriter(pFilename) as writer:
+    with tf.io.TFRecordWriter(pFilename, options="GZIP") as writer:
         for i in range(list(batches)[0]):
             feature = dict()
             if isinstance(pChromFactorsArray, np.ndarray):
