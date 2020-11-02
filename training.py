@@ -335,6 +335,7 @@ def training(trainmatrices,
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict))
     trainDs = trainDs.batch(batchsize)
+    trainDs = trainDs.repeat(numberepochs)
     validationDs = tf.data.TFRecordDataset(validationFilenameList)
     validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict))
     validationDs = validationDs.batch(batchsize)
@@ -342,8 +343,9 @@ def training(trainmatrices,
     #train the neural network
     history = model.fit(trainDs,
               epochs= numberepochs,
-              validation_data=validationDs,
-              callbacks=callback_fns
+              validation_data= validationDs,
+              callbacks= callback_fns,
+              steps_per_epoch= int(np.ceil(nr_samples / batchsize))
             )
 
     #store the trained network
