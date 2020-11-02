@@ -156,16 +156,12 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, matrixDict, factorDict, batchsize, windowsize, binsize=None, shuffle=True, debugState=None):
+    def __init__(self, matrixDict, factorDict, batchsize, windowsize, binsize=None, shuffle=True):
         self.matrixDict = matrixDict
         self.factorDict = factorDict
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
-        try: 
-            self.debugState = int(debugState)
-        except:
-            self.debugState = None
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
         self.chromNames = []
@@ -236,18 +232,6 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                     matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
                 if self.sequencePresent == True:
                     sequenceArray[b] = self.__checkGetDNAsequence(currentFolder, currentChrom, ind)
-                if self.debugState is not None and ind == self.debugState and matrixArray is not None:
-                    m_arr = matrixArray[b].copy()
-                    m_mat = np.zeros((self.windowsize, self.windowsize))
-                    m_mat[np.triu_indices(self.windowsize)] = m_arr
-                    m_mat = np.transpose(m_mat)
-                    m_mat[np.triu_indices(self.windowsize)] = m_arr
-                    plotTitle = "matrix_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
-                    #utils.plotMatrix(m_mat, plotTitle + ".png", plotTitle)
-                    np.save(plotTitle, m_mat)
-                    plotName = "factors_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
-                    #utils.plotChromatinFactors(chromatinFactorArray[b].copy(),25000,currentChrom,currentFolder,plotName + ".png")
-                    np.save(plotName, chromatinFactorArray[b].copy())
         else:
             #some samples are from one chrom/folder pair and the others from another one 
             #split the access indices into lower and upper part

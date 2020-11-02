@@ -91,7 +91,7 @@ tf.random.set_seed(35)
                 required=False, type=click.IntRange(min=5),
                 help="patience for early stopping, stop after this number of epochs w/o improvement in validation loss")
 @click.option("--debugState", "-dbs", 
-                required=False, type=click.Choice(["0","10","100","1000","Figures"]),
+                required=False, type=click.Choice(["0","Figures"]),
                 help="debug state for internal use during development")
 @click.option("--figureType", "-ft",
                 required=False,
@@ -230,15 +230,13 @@ def training(trainmatrices,
                                                         batchsize=recordsize,
                                                         windowsize=windowsize,
                                                         binsize=binsize,
-                                                        shuffle=False, #done in dataset
-                                                        debugState=debugstate)
+                                                        shuffle=False) #done in dataset)
     validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
                                                         factorDict=validationChromFactorsDict,
                                                         batchsize=recordsize,
                                                         windowsize=windowsize,
                                                         binsize=binsize,
-                                                        shuffle=False,
-                                                        debugState=debugstate)    
+                                                        shuffle=False)    
 
     #write the training data to disk as tfRecord
     trainFilenameList = ["trainfile_{:03d}.tfrecord".format(i+1) for i in range(len(trainDataGenerator))]
