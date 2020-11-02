@@ -57,7 +57,7 @@ tf.random.set_seed(35)
                 default=256, show_default=True,
                 help="Batch size for training the neural network.")
 @click.option("--recordsize", "-rs", required=False,
-                type=click.IntRange(min=1000), 
+                type=click.IntRange(min=100), 
                 default=2000, show_default=True,
                 help="size (in samples) for training/validation data records")
 @click.option("--windowsize", "-ws", required=True,
