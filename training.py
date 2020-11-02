@@ -133,35 +133,6 @@ def training(trainmatrices,
     if debugstate is not None and debugstate != "Figures":
         debugstate = int(debugstate)
 
-    # f = np.arange(10*240*12).reshape(10,240,12).astype("float64")
-    # m = np.arange(10*3240).reshape(10,3240).astype("float64")
-    # dna = np.round(np.random.rand(10*2000000*5).reshape(10,2000000,5),0).astype("uint8")
-    # records.writeTFRecord(f,dna,m,"test.tfRecord")
-
-    # shapeDict = {"feats": f.shape[1:], "targs": m.shape[1:], "dna": dna.shape[1:]}
-    # #shapeDict = {"feats": f.shape[1:], "targs": m.shape[1:]}
-    # tds = tf.data.TFRecordDataset("test.tfRecord")
-    # tds = tds.map(lambda x: records.parse_function(x, shapeDict))
-    # tds = tds.batch(1)
-    # l = list(tds.take(1).as_numpy_iterator())
-    # feats0 = l[0][0]["feats"]
-    # print(feats0)
-    # print("shape", feats0.shape)
-    # print(f[0])
-    # dna0 = l[0][0]["dna"]
-    # print(dna0)
-    # print("shape", dna0.shape)
-    # print(dna[0])
-    # print(dna0.dtype)
-    # print("len", len(l))
-    # print("len0", len(l[0]))
-    # print("len0-0", len(l[0][0]))
-    # print("len0-1", len(l[0][1]))
-    # tg = l[0][1][0]
-    # print(tg)
-    # print(tg.shape)
-    # print(m[0])
-
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
     #from different cell lines
