@@ -334,13 +334,19 @@ def training(trainmatrices,
     trainDs = tf.data.TFRecordDataset(trainFilenameList, 
                                         num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                         compression_type="GZIP")
+    trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    trainDs = trainDs.cache()
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
-    trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict))
     trainDs = trainDs.batch(batchsize)
     trainDs = trainDs.repeat(numberepochs)
-    validationDs = tf.data.TFRecordDataset(validationFilenameList)
-    validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict))
+    trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
+    validationDs = tf.data.TFRecordDataset(validationFilenameList, 
+                                            num_parallel_reads=tf.data.experimental.AUTOTUNE,
+                                            compression_type="GZIP")
+    validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    validationDs = validationDs.cache()
     validationDs = validationDs.batch(batchsize)
+    validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
     #train the neural network
     history = model.fit(trainDs,
