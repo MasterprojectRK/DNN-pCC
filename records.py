@@ -10,15 +10,9 @@ def parse_function(example_proto, shapeDict):
     targs = None
     dna = None
     features = {"features": tf.io.FixedLenFeature((), tf.string),
-                "featureShape0": tf.io.FixedLenFeature((), tf.int64),
-                "featureShape1": tf.io.FixedLenFeature((), tf.int64),
                 "targets": tf.io.FixedLenFeature((), tf.string),
-                "targetShape0": tf.io.FixedLenFeature((), tf.int64),
-                "dna": tf.io.FixedLenFeature((), tf.string),
-                "dnaShape0": tf.io.FixedLenFeature((), tf.int64),
-                "dnaShape1": tf.io.FixedLenFeature((), tf.int64)}
+                "dna": tf.io.FixedLenFeature((), tf.string)}
     parsed_features = tf.io.parse_single_example(example_proto, features)
-    #featureShape = tf.io.decode_raw(parsed_features['featureShape'], tf.int64)
     if "feats" in shapeDict:
         feats = tf.io.decode_raw(parsed_features['features'], tf.float64)
         feats = tf.reshape(feats, shapeDict["feats"])
@@ -92,25 +86,15 @@ def writeTFRecord(pChromFactorsArray, pDNASequenceArray, pTargetMatricesArray, p
             feature = dict()
             if isinstance(pChromFactorsArray, np.ndarray):
                 feature['features'] =  _bytes_feature( pChromFactorsArray[i].flatten().tostring() ),
-                feature['featureShape0'] = _int64_feature( pChromFactorsArray[i].shape[0] )
-                feature['featureShape1'] = _int64_feature( pChromFactorsArray[i].shape[1] )
             else:
-                feature['features'] = _bytes_feature( np.array([0,0]).tostring() )
-                feature['featureShape0'] = _int64_feature( 0 )
-                feature['featureShape1'] = _int64_feature( 0 )
+                feature['features'] = _bytes_feature( np.array([0]).tostring() )
             if isinstance(pTargetMatricesArray, np.ndarray):
                 feature['targets'] =  _bytes_feature( pTargetMatricesArray[i].flatten().tostring() )
-                feature['targetShape0'] = _int64_feature( pTargetMatricesArray[i].shape[0]  )
             else:
-                feature['targets'] = _bytes_feature( np.array([0,0]).tostring() )
-                feature['targetShape0'] = _int64_feature( 0 )
+                feature['targets'] = _bytes_feature( np.array([0]).tostring() )
             if isinstance(pDNASequenceArray, np.ndarray):
                 feature['dna'] = _bytes_feature( pDNASequenceArray[i].flatten().tostring() )
-                feature['dnaShape0'] = _int64_feature( pDNASequenceArray[i].shape[0] )
-                feature['dnaShape1'] = _int64_feature( pDNASequenceArray[i].shape[1] )
             else:
-                feature['dna'] = _bytes_feature( np.array([0,0]).tostring() )
-                feature['dnaShape0'] = _int64_feature( 0 )
-                feature['dnaShape1'] = _int64_feature( 0 )
+                feature['dna'] = _bytes_feature( np.array([0]).tostring() )
             example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(example.SerializeToString())
