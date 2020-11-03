@@ -335,7 +335,6 @@ def training(trainmatrices,
                                         num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                         compression_type="GZIP")
     trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    trainDs = trainDs.cache()
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.batch(batchsize)
     trainDs = trainDs.repeat(numberepochs)
@@ -344,7 +343,6 @@ def training(trainmatrices,
                                             num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                             compression_type="GZIP")
     validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    validationDs = validationDs.cache()
     validationDs = validationDs.batch(batchsize)
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
