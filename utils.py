@@ -156,7 +156,7 @@ def plotHistory(pKerasHistoryObject, pFilename):
     ax1.legend(['train', 'val'], loc='upper left')
     fig1.savefig(pFilename)
 
-def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None):
+def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=None):
     #rebuilds the interaction matrix (a trapezoid along its diagonal)
     #by taking the mean of all overlapping triangles
     #returns an interaction matrix as a numpy ndarray
@@ -168,11 +168,19 @@ def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None):
     sum_matrix = np.zeros( (nr_matrices - 1 + (pWindowSize+2*flankingSize), nr_matrices - 1 + (pWindowSize+2*flankingSize)) )
     count_matrix = np.zeros_like(sum_matrix,dtype=int)    
     mean_matrix = np.zeros_like(sum_matrix,dtype="float32")
-    #sum up all the triangular matrices, shifting by one along the diag. for each matrix
-    for i in tqdm(range(nr_matrices), desc="rebuilding matrix"):
+    if pMaxDist is None or pMaxDist == pWindowSize:
+        stepsize = 1
+    else:
+        #trapezoid, compute the stepsize such that the overlap is minimized
+        stepsize = pWindowSize - pMaxDist + 1
+    #sum up all the triangular or trapezoidal matrices, shifting by one along the diag. for each matrix
+    for i in tqdm(range(0, nr_matrices, stepsize), desc="rebuilding matrix"):
         j = i + flankingSize
         k = j + pWindowSize
-        sum_matrix[j:k,j:k][np.triu_indices(pWindowSize)] += pArrayOfTriangles[i]
+        if stepsize == 1: #triangles
+            sum_matrix[j:k,j:k][np.triu_indices(pWindowSize)] += pArrayOfTriangles[i]
+        else: #trapezoids
+            sum_matrix[j:k,j:k][np.mask_indices(pWindowSize, maskFunc, pMaxDist)] += pArrayOfTriangles[i]
         count_matrix[j:k,j:k] += np.ones((pWindowSize,pWindowSize),dtype=int) #keep track of how many matrices have contributed to each position
     mean_matrix[count_matrix!=0] = sum_matrix[count_matrix!=0] / count_matrix[count_matrix!=0]
     return mean_matrix
