@@ -7,7 +7,17 @@ import threading
 import utils
 
 
-def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
+def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None):
+    flankingsize = None
+    maxdist = None
+    if pFlankingSize is None:
+        flankingsize = pWindowSize
+    else:
+        flankingsize = pFlankingSize
+    if pMaxDist is None:
+        maxdist = pWindowSize
+    else:
+        maxdist = min(pWindowSize, pMaxDist)
     sequentialModel = False
     nrFiltersList = []
     kernelSizeList = []
@@ -40,17 +50,24 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
     
     if sequentialModel == True:
         return buildSequentialModel(pWindowSize=pWindowSize,
+                                    pFlankingSize=flankingsize,
+                                    pMaxDist=maxdist,
                                     pNrFactors=pNrFactors,
                                     pNrFiltersList=nrFiltersList,
                                     pKernelWidthList=kernelSizeList,
                                     pNrNeuronsList=nrNeuronsList)
     elif sequentialModel == False and pModelTypeStr == "sequence":
-        return buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols)
+        return buildSequenceModel(pWindowSize=pWindowSize,
+                                  pFlankingSize=flankingsize,
+                                  pMaxDist=maxdist, 
+                                  pNrFactors=pNrFactors, 
+                                  pBinSizeInt=pBinSizeInt, 
+                                  pNrSymbols=pNrSymbols)
     else:
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildSequentialModel(pWindowSize, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList):
+def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList):
     msg = ""
     if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
         msg += "No. of filters must be a list\n"
@@ -66,7 +83,7 @@ def buildSequentialModel(pWindowSize, pNrFactors, pNrFiltersList, pKernelWidthLi
         print(msg)
         return None
     model = Sequential()
-    model.add(Input(shape=(3*pWindowSize,pNrFactors), name="feats"))
+    model.add(Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="feats"))
     #add the requested number of 1D convolutions
     for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
         convParamDict = dict()
@@ -86,22 +103,30 @@ def buildSequentialModel(pWindowSize, pNrFactors, pNrFiltersList, pKernelWidthLi
         model.add(Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName))
         layerName = "dropout_" + str(i+1)
         model.add(Dropout(0.1, name=layerName))
-    #add the output layer (corresponding to a predicted submatrix along the diagonal of a Hi-C matrix)
-    nr_outputNeurons = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even    
+    #add the output layer (corresponding to a predicted submatrix, 
+    #here only the upper triangular part, along the diagonal of a Hi-C matrix)
+    #this matrix may additionally be capped to maxDist, so that a trapezoid remains
+    diff = pWindowSize - pMaxDist
+    nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
+    nr_elements_capped = int( 1/2 * diff * (diff+1) )   
+    nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
     model.add(Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="output_layer"))
     return model
 
-def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
+def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols):
     #consists of two subnets for chromatin factors and sequence, respectively
-    #output neurons
-    out_neurons = int(1/2 * pWindowSize * (pWindowSize + 1)) #always an int, even*odd=even
+    #output neurons, see above for explanation
+    diff = pWindowSize - pMaxDist
+    nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
+    nr_elements_capped = int( 1/2 * diff * (diff+1) )   
+    out_neurons = nr_elements_fullMatrix - nr_elements_capped
     #model for chromatin factors first
     kernelWidth = 1
     nr_neurons1 = 460
     nr_neurons2 = 881
     nr_neurons3 = 1690
     model1 = Sequential()
-    model1.add(Input(shape=(3*pWindowSize,pNrFactors), name="feats"))
+    model1.add(Input(shape=(2*pFlankingSize + pWindowSize,pNrFactors), name="feats"))
     model1.add(Conv1D(filters=1, 
                      kernel_size=kernelWidth, 
                      activation="sigmoid",
@@ -158,7 +183,8 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
     def __init__(self, matrixDict, factorDict, 
                  batchsize, windowsize, flankingsize=None,
-                 binsize=None, shuffle=True):
+                 binsize=None, shuffle=True,
+                 maxdist=None):
         self.matrixDict = matrixDict
         self.factorDict = factorDict
         self.batchsize = batchsize
@@ -169,6 +195,10 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
             self.flankingsize = flankingsize
         else:
             self.flankingsize = self.windowsize
+        if maxdist is not None:
+            self.maxdist = min(maxdist, windowsize)
+        else:
+            self.maxdist = self.windowsize
         self.shuffle = shuffle
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
@@ -325,10 +355,14 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
     def __getMatrixData(self, mName, chromName, idx):
         if self.matrixDict is None:
             return None
-        #the 0-th matrix starts a windowsize away from the boundary
+        #the 0-th matrix starts flankingsize away from the boundary
         startInd = idx + self.flankingsize
         stopInd = startInd + self.windowsize
-        trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(self.windowsize)]
+        trainmatrix = None
+        if self.maxdist == self.windowsize: #triangles, i. e. full submatrices
+            trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(self.windowsize)]
+        else: #trapezoids, i.e. distance limited submatrices
+            trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(self.windowsize, utils.maskFunc, self.maxdist)]
         trainmatrix = np.nan_to_num(trainmatrix)
         return trainmatrix
 
