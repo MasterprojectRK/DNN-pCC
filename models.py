@@ -1,6 +1,7 @@
 import tensorflow
 from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D
 from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras import Input
 import numpy as np
 import threading 
 import utils
@@ -65,6 +66,7 @@ def buildSequentialModel(pWindowSize, pNrFactors, pNrFiltersList, pKernelWidthLi
         print(msg)
         return None
     model = Sequential()
+    model.add(Input(shape=(3*pWindowSize,pNrFactors), name="feats"))
     #add the requested number of 1D convolutions
     for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
         convParamDict = dict()
@@ -75,8 +77,6 @@ def buildSequentialModel(pWindowSize, pNrFactors, pNrFiltersList, pKernelWidthLi
         convParamDict["data_format"]="channels_last"
         if kernelWidth > 1:
             convParamDict["padding"] = "same"
-        if i == 0:
-            convParamDict["input_shape"] = (3*pWindowSize,pNrFactors)
         model.add(Conv1D(**convParamDict))
     #flatten the output from the convolutions
     model.add(Flatten(name="flatten_1"))
@@ -101,11 +101,11 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
     nr_neurons2 = 881
     nr_neurons3 = 1690
     model1 = Sequential()
+    model1.add(Input(shape=(3*pWindowSize,pNrFactors), name="feats"))
     model1.add(Conv1D(filters=1, 
                      kernel_size=kernelWidth, 
                      activation="sigmoid",
-                     data_format="channels_last",
-                     input_shape=(3*pWindowSize,pNrFactors)))
+                     data_format="channels_last"))
     model1.add(Flatten())
     model1.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
     model1.add(Dropout(0.1))
@@ -120,11 +120,11 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
     kernelSize1 = 6
     kernelSize2 = 10
     model2 = Sequential()
+    model2.add(Input(shape=(pWindowSize*pBinSizeInt,pNrSymbols), name="dna"))
     model2.add(Conv1D(filters=filters1, 
                       kernel_size=kernelSize1,
                       activation="relu",
-                      data_format="channels_last",
-                      input_shape=(pWindowSize*pBinSizeInt,pNrSymbols)))
+                      data_format="channels_last"))
     model2.add(MaxPool1D(maxpool1))
     model2.add(Conv1D(filters=filters1,
                       kernel_size=kernelSize1,
@@ -156,16 +156,12 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, matrixDict, factorDict, batchsize, windowsize, binsize=None, shuffle=True, debugState=None):
+    def __init__(self, matrixDict, factorDict, batchsize, windowsize, binsize=None, shuffle=True):
         self.matrixDict = matrixDict
         self.factorDict = factorDict
         self.batchsize = batchsize
         self.windowsize = windowsize
         self.shuffle = shuffle
-        try: 
-            self.debugState = int(debugState)
-        except:
-            self.debugState = None
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
         self.chromNames = []
@@ -215,7 +211,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
             matrixArray = np.empty((len(globalIndices), int(self.windowsize*(self.windowsize + 1)/2)))
         sequenceArray = None
         if self.sequencePresent:
-            sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)))
+            sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)), dtype=np.uint8)
         #find the correct global -> local mapping for of the first and last global index in the batch
         indBreakpoints = [bp for bp in self.globalIndexMapping]
         lowerMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[0])
@@ -236,18 +232,6 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
                     matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
                 if self.sequencePresent == True:
                     sequenceArray[b] = self.__checkGetDNAsequence(currentFolder, currentChrom, ind)
-                if self.debugState is not None and ind == self.debugState and matrixArray is not None:
-                    m_arr = matrixArray[b].copy()
-                    m_mat = np.zeros((self.windowsize, self.windowsize))
-                    m_mat[np.triu_indices(self.windowsize)] = m_arr
-                    m_mat = np.transpose(m_mat)
-                    m_mat[np.triu_indices(self.windowsize)] = m_arr
-                    plotTitle = "matrix_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
-                    #utils.plotMatrix(m_mat, plotTitle + ".png", plotTitle)
-                    np.save(plotTitle, m_mat)
-                    plotName = "factors_" + str(ind) + "_" + str(currentChrom) + "_" + currentFolder.replace("/", "--")
-                    #utils.plotChromatinFactors(chromatinFactorArray[b].copy(),25000,currentChrom,currentFolder,plotName + ".png")
-                    np.save(plotName, chromatinFactorArray[b].copy())
         else:
             #some samples are from one chrom/folder pair and the others from another one 
             #split the access indices into lower and upper part
