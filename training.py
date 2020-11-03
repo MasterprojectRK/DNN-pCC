@@ -7,6 +7,7 @@ import numpy as np
 import csv
 import os
 from tqdm import tqdm
+import pydot # implicitly required for plotting models
 
 from numpy.random import seed
 seed(35)
