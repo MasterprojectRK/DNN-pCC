@@ -156,37 +156,26 @@ def plotHistory(pKerasHistoryObject, pFilename):
     ax1.legend(['train', 'val'], loc='upper left')
     fig1.savefig(pFilename)
 
-def rebuildMatrix(pArrayOfTriangles, pWindowSize):
+def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None):
     #rebuilds the interaction matrix (a trapezoid along its diagonal)
     #by taking the mean of all overlapping triangles
     #returns an interaction matrix as a numpy ndarray
+    if pFlankingSize == None:
+        flankingSize = pWindowSize
+    else:
+        flankingSize = pFlankingSize
     nr_matrices = pArrayOfTriangles.shape[0]
-    sum_matrix = np.zeros((nr_matrices-1+3*pWindowSize,nr_matrices-1+3*pWindowSize))
+    sum_matrix = np.zeros( (nr_matrices - 1 + (pWindowSize+2*flankingSize), nr_matrices - 1 + (pWindowSize+2*flankingSize)) )
     count_matrix = np.zeros_like(sum_matrix,dtype=int)    
     mean_matrix = np.zeros_like(sum_matrix,dtype="float32")
     #sum up all the triangular matrices, shifting by one along the diag. for each matrix
     for i in tqdm(range(nr_matrices), desc="rebuilding matrix"):
-        j = i + pWindowSize
+        j = i + flankingSize
         k = j + pWindowSize
         sum_matrix[j:k,j:k][np.triu_indices(pWindowSize)] += pArrayOfTriangles[i]
         count_matrix[j:k,j:k] += np.ones((pWindowSize,pWindowSize),dtype=int) #keep track of how many matrices have contributed to each position
     mean_matrix[count_matrix!=0] = sum_matrix[count_matrix!=0] / count_matrix[count_matrix!=0]
     return mean_matrix
-
-def buildMatrixArray(pSparseMatrix, pWindowSize_bins):
-    #get all possible (overlapping) windowSize x windowSize matrices out of the original one
-    #and put them into a numpy array
-    #ignore the first windowSize matrices because of the window approach by Farre et al.
-    matrixSize_bins = int(1/2 * pWindowSize_bins * (pWindowSize_bins + 1)) #always an integer because even*odd=even
-    nr_matrices = int(pSparseMatrix.shape[0] - 3*pWindowSize_bins + 1)
-    #nr_matrices = 100
-    matrixArray = np.empty(shape=(nr_matrices,matrixSize_bins))
-    for i in tqdm(range(nr_matrices),desc="composing matrices"):
-        j = i + pWindowSize_bins
-        k = j + pWindowSize_bins
-        trainmatrix = pSparseMatrix[j:k,j:k].todense()[np.triu_indices(pWindowSize_bins)]
-        matrixArray[i] = trainmatrix
-    return matrixArray
 
 def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeList=None,  pMetadata=None):
     #takes a matrix as numpy array or sparse matrix and writes a cooler matrix from it

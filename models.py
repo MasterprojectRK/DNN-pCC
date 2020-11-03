@@ -156,11 +156,19 @@ def buildSequenceModel(pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols):
 
 
 class multiInputGenerator(tensorflow.keras.utils.Sequence):
-    def __init__(self, matrixDict, factorDict, batchsize, windowsize, binsize=None, shuffle=True):
+    def __init__(self, matrixDict, factorDict, 
+                 batchsize, windowsize, flankingsize=None,
+                 binsize=None, shuffle=True):
         self.matrixDict = matrixDict
         self.factorDict = factorDict
         self.batchsize = batchsize
-        self.windowsize = windowsize
+        #the size of the submatrix
+        self.windowsize = windowsize 
+        #the size of the flanking regions left/right of the submatrix
+        if flankingsize is not None:
+            self.flankingsize = flankingsize
+        else:
+            self.flankingsize = self.windowsize
         self.shuffle = shuffle
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
@@ -205,7 +213,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         #initialize the return arrays
         #len(globalIndices) is generally equal to batchsize
         #but the last batch may be smaller
-        chromatinFactorArray = np.empty((len(globalIndices), 3*self.windowsize, self.nr_factors))
+        chromatinFactorArray = np.empty((len(globalIndices), self.windowsize + 2*self.flankingsize, self.nr_factors))
         matrixArray = None
         if self.matrixDict is not None:
             matrixArray = np.empty((len(globalIndices), int(self.windowsize*(self.windowsize + 1)/2)))
@@ -303,7 +311,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
             folderIndDict = dict()
             for folder in self.factorDict:
                 actDataLength = self.factorDict[folder]["data"][chromName].shape[0]
-                nr_samples = actDataLength - 3*self.windowsize + 1
+                nr_samples = actDataLength - (self.windowsize + 2*self.flankingsize) + 1
                 folderIndDict[folder] = np.arange(nr_samples)
                 globalIndex += nr_samples
                 globalIndexMapping[globalIndex] = [chromName, folder]
@@ -318,7 +326,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         if self.matrixDict is None:
             return None
         #the 0-th matrix starts a windowsize away from the boundary
-        startInd = idx + self.windowsize
+        startInd = idx + self.flankingsize
         stopInd = startInd + self.windowsize
         trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(self.windowsize)]
         trainmatrix = np.nan_to_num(trainmatrix)
@@ -326,7 +334,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
 
     def __getFactorData(self, folder, chromName, idx):
         startInd = idx
-        stopInd = startInd + 3*self.windowsize
+        stopInd = startInd + self.windowsize + 2*self.flankingsize
         return self.factorDict[folder]["data"][chromName][startInd:stopInd,:]
     
     def __checkGetDNAsequence(self, folder, chromname, idx):
@@ -334,7 +342,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         #and reload, if not
         #this method should work as long as there are 
         #more batches in each chromosome than worker threads
-        startInd = idx + self.windowsize * self.binsize
+        startInd = idx + self.flankingsize * self.binsize
         stopInd = startInd + self.windowsize * self.binsize            
         requiredSeqFile = self.factorDict[folder]["seqFile"]
         requiredChromName = self.factorDict[folder]["seqID"][chromname]
