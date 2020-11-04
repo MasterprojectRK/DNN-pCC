@@ -92,7 +92,7 @@ def prediction(validationmatrix,
         if maxdist > windowsize:
             msg = "Aborting. Parameters maxdist and windowsize from train parameter file colliding. Maxdist cannot be larger than windowsize."
             raise SystemExit(msg)
-        
+
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
         raise SystemExit(msg)
@@ -179,10 +179,12 @@ def prediction(validationmatrix,
                                                     pFlankingSize=flankingsize,
                                                     pMaxDist=maxdist )
     coolerMatrixName = outputpath + "predMatrix.cool"
+    metadata = {"trainParams": trainParamDict, "predParams": predParamDict}
     utils.writeCooler(pMatrixList=matrixPerChromList,
                      pBinSizeInt=binSizeInt,
                      pOutfile=coolerMatrixName,
-                     pChromosomeList=chromNameList)
+                     pChromosomeList=chromNameList,
+                     pMetadata=metadata)
 
     #If target matrix provided, compute loss 
     #to assess prediction quality
