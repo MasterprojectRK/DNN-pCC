@@ -81,17 +81,20 @@ def prediction(validationmatrix,
 
     #backward compatibility with oder param files
     flankingsize = None
-    if "flankingsize" in trainParamDict:
+    try:
         flankingsize = int(trainParamDict["flankingsize"])
-    else:
+    except:
         flankingsize = windowsize
+
     #backward compatibility with oder param files
     maxdist = None
-    if "maxdist" in trainParamDict:
+    try:
         maxdist = int(trainParamDict["maxdist"])
-        if maxdist > windowsize:
-            msg = "Aborting. Parameters maxdist and windowsize from train parameter file colliding. Maxdist cannot be larger than windowsize."
-            raise SystemExit(msg)
+    except:
+        maxdist = None
+    if maxdist is not None and maxdist > windowsize:
+        msg = "Aborting. Parameters maxdist and windowsize from train parameter file colliding. Maxdist cannot be larger than windowsize."
+        raise SystemExit(msg)
 
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
