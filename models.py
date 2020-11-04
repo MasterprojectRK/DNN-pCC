@@ -199,6 +199,9 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
             self.maxdist = min(maxdist, windowsize)
         else:
             self.maxdist = self.windowsize
+        self.matrixSize = int(self.windowsize * (self.windowsize + 1) / 2)
+        if self.maxdist is not None:
+            self.matrixSize -= int( (self.windowsize - self.maxdist)*(self.windowsize - self.maxdist + 1) / 2 )
         self.shuffle = shuffle
         self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
         #get the chrom names
@@ -246,7 +249,7 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
         chromatinFactorArray = np.empty((len(globalIndices), self.windowsize + 2*self.flankingsize, self.nr_factors))
         matrixArray = None
         if self.matrixDict is not None:
-            matrixArray = np.empty((len(globalIndices), int(self.windowsize*(self.windowsize + 1)/2)))
+            matrixArray = np.empty((len(globalIndices), self.matrixSize))
         sequenceArray = None
         if self.sequencePresent:
             sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)), dtype=np.uint8)

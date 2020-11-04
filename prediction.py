@@ -79,6 +79,20 @@ def prediction(validationmatrix,
         msg = msg.format(str(e))
         raise SystemExit(msg)
 
+    #backward compatibility with oder param files
+    flankingsize = None
+    if "flankingsize" in trainParamDict:
+        flankingsize = int(trainParamDict["flankingsize"])
+    else:
+        flankingsize = windowsize
+    #backward compatibility with oder param files
+    maxdist = None
+    if "maxdist" in trainParamDict:
+        maxdist = int(trainParamDict["maxdist"])
+        if maxdist > windowsize:
+            msg = "Aborting. Parameters maxdist and windowsize from train parameter file colliding. Maxdist cannot be larger than windowsize."
+            raise SystemExit(msg)
+        
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
         raise SystemExit(msg)
@@ -135,8 +149,10 @@ def prediction(validationmatrix,
                                                 factorDict=chromFactorsDict,
                                                 batchsize=batchSizeInt,
                                                 windowsize=windowsize,
+                                                flankingsize=flankingsize,
                                                 binsize=binSizeInt,
-                                                shuffle=False)  
+                                                shuffle=False,
+                                                maxdist=maxdist)  
 
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
@@ -144,7 +160,7 @@ def prediction(validationmatrix,
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
-    chrLengthInBinsList = [chromFactorsDict[chromatinpath]["data"][chrom].shape[0] - 3*windowsize + 1  for chrom in chromNameList]
+    chrLengthInBinsList = [chromFactorsDict[chromatinpath]["data"][chrom].shape[0] - (windowsize + 2*flankingsize) + 1  for chrom in chromNameList]
     if sum(chrLengthInBinsList) != predMatrixArray.shape[0]:
         msg = "Aborting. Failed separating prediction into single chromosomes"
         raise SystemExit(msg)
@@ -158,7 +174,10 @@ def prediction(validationmatrix,
     #rebuild the cooler matrices from the overlapping 
     #submatrices for each chromosome and write to disk
     for i, matrix in enumerate(matrixPerChromList):
-        matrixPerChromList[i] = utils.rebuildMatrix(matrix, windowsize)
+        matrixPerChromList[i] = utils.rebuildMatrix(pArrayOfTriangles=matrix, 
+                                                    pWindowSize=windowsize,
+                                                    pFlankingSize=flankingsize,
+                                                    pMaxDist=maxdist )
     coolerMatrixName = outputpath + "predMatrix.cool"
     utils.writeCooler(pMatrixList=matrixPerChromList,
                      pBinSizeInt=binSizeInt,
@@ -172,8 +191,10 @@ def prediction(validationmatrix,
                                                   factorDict=chromFactorsDict,
                                                   batchsize=batchSizeInt,
                                                   windowsize=windowsize,
+                                                  flankingsize=flankingsize,
                                                   binsize=binSizeInt,
-                                                  shuffle=False)
+                                                  shuffle=False,
+                                                  maxdist=maxdist)
         loss = trainedModel.evaluate(evalGenerator)
         print("loss: {:.3f}".format(loss))
 

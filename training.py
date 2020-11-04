@@ -65,6 +65,12 @@ tf.random.set_seed(35)
                 type=click.IntRange(min=10), 
                 default=80, show_default=True,
                 help="Window size (in bins) for composing training data")
+@click.option("--flankingsize", "-fs", required=False,
+                type=click.IntRange(min=10),
+                help="Size of flanking regions left/right of window in bins. Equal to windowsize if not set")
+@click.option("--maxdist", "-md", required=False,
+                type=click.IntRange(min=1),
+                help="Training window can be capped at this distance (in bins). Equal to windowsize if not set")
 @click.option("--scaleMatrix", "-scm", required=False,
                 type=bool, 
                 default=False, show_default=True,
@@ -118,6 +124,8 @@ def training(trainmatrices,
             batchsize,
             recordsize,
             windowsize,
+            flankingsize,
+            maxdist,
             scalematrix,
             clampfactors,
             scalefactors,
@@ -133,6 +141,15 @@ def training(trainmatrices,
 
     if debugstate is not None and debugstate != "Figures":
         debugstate = int(debugstate)
+
+    if maxdist is not None:
+        maxdist = min(windowsize, maxdist)
+        paramDict["maxdist"] = maxdist
+
+    if flankingsize is None:
+        flankingsize = windowsize
+        paramDict["flankingsize"] = windowsize
+
 
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
@@ -230,14 +247,18 @@ def training(trainmatrices,
                                                         factorDict=trainChromFactorsDict,
                                                         batchsize=recordsize,
                                                         windowsize=windowsize,
+                                                        flankingsize=flankingsize,
                                                         binsize=binsize,
-                                                        shuffle=False) #done in dataset)
+                                                        shuffle=False, #done in dataset)
+                                                        maxdist=maxdist)
     validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
                                                         factorDict=validationChromFactorsDict,
                                                         batchsize=recordsize,
                                                         windowsize=windowsize,
+                                                        flankingsize=flankingsize,
                                                         binsize=binsize,
-                                                        shuffle=False)    
+                                                        shuffle=False,
+                                                        maxdist=maxdist)    
 
     #write the training data to disk as tfRecord
     trainFilenameList = ["trainfile_{:03d}.tfrecord".format(i+1) for i in range(len(trainDataGenerator))]
@@ -262,7 +283,9 @@ def training(trainmatrices,
                                     pWindowSize=windowsize,
                                     pBinSizeInt=binsize,
                                     pNrFactors=nr_factors,
-                                    pNrSymbols=nr_symbols)
+                                    pNrSymbols=nr_symbols,
+                                    pFlankingSize=flankingsize,
+                                    pMaxDist=maxdist)
     #create optimizer
     kerasOptimizer = None
     if optimizer == "SGD":
@@ -327,9 +350,13 @@ def training(trainmatrices,
     
     #build input streams
     shuffleBufferSize = 3*recordsize
+    targSize = int( windowsize* (windowsize+1) / 2 )
+    if maxdist is not None:
+        targSize -= int( (windowsize-maxdist)*(windowsize-maxdist+1) / 2 )
     shapeDict = dict()
-    shapeDict["feats"] = (3*windowsize,nr_factors)
-    shapeDict["targs"] = ( int(windowsize*(windowsize+1)/2), )
+    shapeDict["feats"] = (windowsize + 2*flankingsize, nr_factors)
+    shapeDict["targs"] = (targSize, )
+
     if sequencefile is not None:
         shapeDict["dna"] = (windowsize*binsize,nr_symbols)
     trainDs = tf.data.TFRecordDataset(trainFilenameList, 
