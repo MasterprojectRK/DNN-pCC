@@ -156,7 +156,7 @@ def plotHistory(pKerasHistoryObject, pFilename):
     ax1.legend(['train', 'val'], loc='upper left')
     fig1.savefig(pFilename)
 
-def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=None):
+def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=None, pStepsize=1):
     #rebuilds the interaction matrix (a trapezoid along its diagonal)
     #by taking the mean of all overlapping triangles
     #returns an interaction matrix as a numpy ndarray
@@ -172,12 +172,13 @@ def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=N
         stepsize = 1
     else:
         #trapezoid, compute the stepsize such that the overlap is minimized
-        stepsize = pWindowSize - pMaxDist + 1
+        stepsize = max(pStepsize, 1)
+        stepsize = min(stepsize, pWindowSize - pMaxDist + 1) #the largest possible value such that predictions are available for all bins
     #sum up all the triangular or trapezoidal matrices, shifting by one along the diag. for each matrix
     for i in tqdm(range(0, nr_matrices, stepsize), desc="rebuilding matrix"):
         j = i + flankingSize
         k = j + pWindowSize
-        if stepsize == 1: #triangles
+        if pMaxDist is None or pMaxDist == pWindowSize: #triangles
             sum_matrix[j:k,j:k][np.triu_indices(pWindowSize)] += pArrayOfTriangles[i]
         else: #trapezoids
             sum_matrix[j:k,j:k][np.mask_indices(pWindowSize, maskFunc, pMaxDist)] += pArrayOfTriangles[i]
