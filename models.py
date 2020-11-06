@@ -22,6 +22,7 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
     nrFiltersList = []
     kernelSizeList = []
     nrNeuronsList = []
+    dropoutRate = 0.5
     if pModelTypeStr == "initial":
         #original model by Farre et al
         #See publication "Dense neural networks for predicting chromatin conformation" (https://doi.org/10.1186/s12859-018-2286-z).
@@ -29,6 +30,7 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
         kernelSizeList = [1]
         nrNeuronsList = [460,881,1690]
         sequentialModel = True
+        dropoutRate = 0.1
     elif pModelTypeStr == "wider":
         #test model with wider filters
         nrFiltersList = [1]
@@ -55,19 +57,21 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
                                     pNrFactors=pNrFactors,
                                     pNrFiltersList=nrFiltersList,
                                     pKernelWidthList=kernelSizeList,
-                                    pNrNeuronsList=nrNeuronsList)
+                                    pNrNeuronsList=nrNeuronsList,
+                                    pDropoutRate=dropoutRate)
     elif sequentialModel == False and pModelTypeStr == "sequence":
         return buildSequenceModel(pWindowSize=pWindowSize,
                                   pFlankingSize=flankingsize,
                                   pMaxDist=maxdist, 
                                   pNrFactors=pNrFactors, 
                                   pBinSizeInt=pBinSizeInt, 
-                                  pNrSymbols=pNrSymbols)
+                                  pNrSymbols=pNrSymbols,
+                                  pDropoutRate=dropoutRate)
     else:
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList):
+def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate):
     msg = ""
     if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
         msg += "No. of filters must be a list\n"
@@ -80,6 +84,10 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
         return None
     if len(pNrFiltersList) != len(pKernelWidthList) or len(pNrFiltersList) < 1:
         msg = "kernel widths and no. of filters must be specified for all 1Dconv. layers (min. 1 layer)"
+        print(msg)
+        return None
+    if pDropoutRate <= 0 or pDropoutRate >= 1: 
+        msg = "dropout must be in (0..1)"
         print(msg)
         return None
     model = Sequential()
@@ -102,7 +110,7 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
         layerName = "dense_" + str(i+1)
         model.add(Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName))
         layerName = "dropout_" + str(i+1)
-        model.add(Dropout(0.1, name=layerName))
+        model.add(Dropout(pDropoutRate, name=layerName))
     #add the output layer (corresponding to a predicted submatrix, 
     #here only the upper triangular part, along the diagonal of a Hi-C matrix)
     #this matrix may additionally be capped to maxDist, so that a trapezoid remains
@@ -113,7 +121,7 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
     model.add(Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="output_layer"))
     return model
 
-def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols):
+def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols, pDropoutRate):
     #consists of two subnets for chromatin factors and sequence, respectively
     #output neurons, see above for explanation
     diff = pWindowSize - pMaxDist
@@ -133,11 +141,11 @@ def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSiz
                      data_format="channels_last"))
     model1.add(Flatten())
     model1.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
-    model1.add(Dropout(0.1))
+    model1.add(Dropout(pDropoutRate))
     model1.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2"))
-    model1.add(Dropout(0.1))
+    model1.add(Dropout(pDropoutRate))
     model1.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
-    model1.add(Dropout(0.1))
+    model1.add(Dropout(pDropoutRate))
     
     #CNN model for sequence
     filters1 = 5
@@ -172,7 +180,7 @@ def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSiz
                       data_format="channels_last"))                              
     model2.add(Flatten())
     model2.add(Dense(nr_neurons2, activation="relu",kernel_regularizer="l2"))
-    model2.add(Dropout(0.1))
+    model2.add(Dropout(pDropoutRate))
     combined = Concatenate()([model1.output,model2.output])
     x = Dense(out_neurons,activation="relu",kernel_regularizer="l2")(combined)
  
