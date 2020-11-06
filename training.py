@@ -91,7 +91,7 @@ tf.random.set_seed(35)
                 default="SGD", show_default=True,
                 help="Optimizer to use: SGD, Adam, RMSprop or cosine similarity.")
 @click.option("--loss", "-l", required=False,
-                type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
+                type=click.Choice(["MSE", "Huber", "MAE", "MAPE", "MSLE", "Cosine"]),
                 default="MSE", show_default=True,
                 help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity.")
 @click.option("--earlyStopping", "-early",
@@ -300,6 +300,8 @@ def training(trainmatrices,
     loss_fn = None
     if loss == "MSE":
         loss_fn = tf.keras.losses.MeanSquaredError()
+    elif loss == "Huber":
+        loss_fn = tf.keras.losses.Huber(delta=2.5)
     elif loss == "MAE":
         loss_fn = tf.keras.losses.MeanAbsoluteError()
     elif loss == "MAPE":
