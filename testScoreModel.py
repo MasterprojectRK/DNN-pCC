@@ -19,7 +19,7 @@ def main_fn():
 
 
     #build the model
-    mod = buildModel(matsize, nr_factors, nr_batches)
+    mod = buildModel(matsize, diamondsize, nr_factors, nr_batches)
     mod.summary()
     tf.keras.utils.plot_model(mod,show_shapes=True, to_file=modelPlotName)
     #compile the model
@@ -42,10 +42,10 @@ def main_fn():
 
 
 
-def buildModel(pMatsize, pNrFactors, pBatchsize):
+def buildModel(pMatsize, pDiamondsize, pNrFactors, pBatchsize):
     inputs = Input(shape=(pMatsize,pNrFactors))
     matBranch = buildMatrixBranch(inputs, pMatsize, pNrFactors) 
-    scoreBranch = buildScoreBranch(matBranch, pMatsize, pBatchsize)
+    scoreBranch = buildScoreBranch(matBranch, pMatsize, pDiamondsize, pBatchsize)
     #fullModel = Model(inputs=matModel.inputs, outputs=[matModel.outputs,scoreModel.outputs])
     model = Model(inputs=inputs, outputs=[matBranch,scoreBranch], name="testScoreModel")
     return model
@@ -59,9 +59,9 @@ def buildMatrixBranch(pInputs,pMatsize, pNrFactors):
     x = Dense(out_neurons, activation="relu", name="matrix_out")(x)
     return x
 
-def buildScoreBranch(pInputs, pMatsize, pBatchsize):
+def buildScoreBranch(pInputs, pMatsize, pDiamondsize, pBatchsize):
     x = CustomReshapeLayer(pMatsize, pBatchsize)(pInputs)
-    x = DiamondLayer(pMatsize,2,pBatchsize, name="score_out")(x)
+    x = DiamondLayer(pMatsize,pDiamondsize,pBatchsize, name="score_out")(x)
     return x
 
 def makeTrainTestSamples(nr_batches, matsize, nr_factors, diamondsize):
