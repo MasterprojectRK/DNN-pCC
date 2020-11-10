@@ -90,36 +90,34 @@ class CustomReshapeLayer(tf.keras.layers.Layer):
         super(CustomReshapeLayer, self).__init__()
         self.matsize = matsize
         self.tensList = []
-        self.batchsize = int(batchsize)
+        #self.batchsize = int(batchsize)
+        self.triu_indices = [ [x,y] for x,y in zip(np.triu_indices(self.matsize)[0], np.triu_indices(self.matsize)[1]) ]
     
+    def build(self, input_shape):
+        print("ins", input_shape)
+        self.batchsize = input_shape[0]
+
     @tf.function
     def call(self, inputs):
         #for i in range(self.batchsize):
-        for i in range(self.batchsize):
-            try: 
-                self.tensList.append(self.pickItems(i, inputs))
-            except:
-                #for batches that do not have the full number of samples
-                #e.g. last batch in a dataset
-                #no idea how to do this properly
-                pass
+        if self.batchsize is not None:
+            for i in range(self.batchsize):
+                try: 
+                    self.tensList.append(self.pickItems(i, inputs))
+                except:
+                    #for batches that do not have the full number of samples
+                    #e.g. last batch in a dataset
+                    #no idea how to do this properly
+                    pass
         return tf.stack(self.tensList)
 
     def pickItems(self, batch_index, inputs):
         #pick the right items from flattened upper triangular matrix part
         #and stack them such that a (matrix_size, matrix_size) shaped tensor is created
-    
-        #incremental buildup of start indices
-        #in the flattened array, the first row of the output matrix starts at zero, 
-        #the second row starts at startIndexList[-1] + matrixsize - 1, 
-        #the third at startIndexList[-1] + matrixsize - 2 etc.
-        startIndexList = [0]
-        for j in range(self.matsize - 1):
-            startIndexList.append(startIndexList[-1] + self.matsize - j - 1)
-        endIndexList = [j + self.matsize for j in startIndexList]
-        #pick the required elements from the input tensor
-        l = [ inputs[batch_index][k:l] for k,l in zip(startIndexList, endIndexList) ]
-        return tf.stack(l)
+        sparseTriuTens = tf.SparseTensor(self.triu_indices, 
+                                        values=inputs[batch_index], 
+                                        dense_shape=[self.matsize, self.matsize] )
+        return tf.sparse.to_dense(sparseTriuTens)
 
 class DiamondLayer(tf.keras.layers.Layer):
     def __init__(self, matsize, diamondsize, batchsize, **kwargs):
