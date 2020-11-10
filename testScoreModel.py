@@ -15,26 +15,9 @@ def main_fn():
     nr_epochs = 10
     modelPlotName = "scoreModel.png"
 
+    train_features, targ_matrices, targ_scores = makeTrainTestSamples(nr_batches=nr_batches, matsize=matsize, nr_factors=nr_factors, diamondsize=diamondsize)
 
-    
-    #train features
-    train_features = np.random.rand(nr_batches,matsize,nr_factors).astype("float32")
-    #target matrices and scores
-    targ_matrices = np.random.rand(nr_batches,int( matsize*(matsize+1)/2 )).astype("float32")
-    #target scores computed from target matrices
-    nr_diamonds = matsize - 2*diamondsize
-    targ_scores = np.zeros(shape=(nr_batches, nr_diamonds), dtype="float32")
-    for i in range(nr_batches):
-        tmpMat = np.zeros(shape=(matsize, matsize), dtype="float32")
-        tmpMat[np.triu_indices(matsize)] = targ_matrices[i]
-        rowEndList = [i + diamondsize for i in range(nr_diamonds)]
-        rowStartList = [i-diamondsize for i in rowEndList] 
-        columnStartList = [i+1 for i in rowEndList]
-        columnEndList = [i+diamondsize for i in columnStartList]
-        l = [ tmpMat[r:s,t:u] for r,s,t,u in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
-        l = [np.mean(i1) for i1 in l]
-        targ_scores[i] = np.array(l)
-    
+
     #build the model
     mod = buildModel(matsize, nr_factors, nr_batches)
     mod.summary()
@@ -80,6 +63,26 @@ def buildScoreBranch(pInputs, pMatsize, pBatchsize):
     x = CustomReshapeLayer(pMatsize, pBatchsize)(pInputs)
     x = DiamondLayer(pMatsize,2,pBatchsize, name="score_out")(x)
     return x
+
+def makeTrainTestSamples(nr_batches, matsize, nr_factors, diamondsize):
+    #train features
+    train_features = np.random.rand(nr_batches,matsize,nr_factors).astype("float32")
+    #target matrices and scores
+    targ_matrices = np.random.rand(nr_batches,int( matsize*(matsize+1)/2 )).astype("float32")
+    #target scores computed from target matrices
+    nr_diamonds = matsize - 2*diamondsize
+    targ_scores = np.zeros(shape=(nr_batches, nr_diamonds), dtype="float32")
+    for i in range(nr_batches):
+        tmpMat = np.zeros(shape=(matsize, matsize), dtype="float32")
+        tmpMat[np.triu_indices(matsize)] = targ_matrices[i]
+        rowEndList = [i + diamondsize for i in range(nr_diamonds)]
+        rowStartList = [i-diamondsize for i in rowEndList] 
+        columnStartList = [i+1 for i in rowEndList]
+        columnEndList = [i+diamondsize for i in columnStartList]
+        l = [ tmpMat[r:s,t:u] for r,s,t,u in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
+        l = [np.mean(i1) for i1 in l]
+        targ_scores[i] = np.array(l)
+    return train_features, targ_matrices, targ_scores
 
 
 class CustomReshapeLayer(tf.keras.layers.Layer):
