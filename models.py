@@ -1,4 +1,4 @@
-import tensorflow
+import tensorflow as tf
 from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras import Input
@@ -188,7 +188,7 @@ def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSiz
     return finalModel
 
 
-class multiInputGenerator(tensorflow.keras.utils.Sequence):
+class multiInputGenerator(tf.keras.utils.Sequence):
     def __init__(self, matrixDict, factorDict, 
                  batchsize, windowsize, flankingsize=None,
                  binsize=None, shuffle=True,
@@ -418,3 +418,65 @@ class multiInputGenerator(tensorflow.keras.utils.Sequence):
             else:
                 retArr = oldSeqDict[requiredSeqIdentifier][startInd:stopInd]
         return retArr
+
+class CustomReshapeLayer(tf.keras.layers.Layer):
+    '''
+    reshape a 1D tensor such that it represents 
+    the upper triangular part of a square 2D matrix with shape (matsize, matsize)
+    #example: 
+     [1,2,3,4,5,6] => [[1,2,3],
+                       [0,4,5],
+                       [0,0,6]]
+    '''
+    def __init__(self, matsize, **kwargs):
+        super(CustomReshapeLayer, self).__init__(**kwargs)
+        self.matsize = matsize
+        self.triu_indices = [ [x,y] for x,y in zip(np.triu_indices(self.matsize)[0], np.triu_indices(self.matsize)[1]) ]
+
+    def call(self, inputs):      
+        return tf.map_fn(self.pickItems, inputs)
+    
+    def pickItems(self, inputVec):
+        sparseTriuTens = tf.SparseTensor(self.triu_indices, 
+                                        values=inputVec, 
+                                        dense_shape=[self.matsize, self.matsize] )
+        return tf.sparse.to_dense(sparseTriuTens)
+
+class TadInsulationScoreLayer(tf.keras.layers.Layer):
+    '''
+    Computes TAD insulation scores for square 2D tensors with shape (matsize,matsize)
+    and fixed-size insulation blocks ("diamonds") with shape (diamondsize,diamondsize)
+    '''
+    def __init__(self, matsize, diamondsize, **kwargs):
+        super(TadInsulationScoreLayer, self).__init__(**kwargs)
+        self.matsize = int(matsize)
+        self.diamondsize = int(diamondsize)
+        if self.diamondsize >= self.matsize:
+            msg = "Diamondsize {:d} must be smaller than matrix size {:d}"
+            msg = msg.format(self.diamondsize, self.matsize)
+            raise ValueError(msg)
+    
+    def call(self, inputs):
+        return tf.map_fn(self.pickItems, inputs)
+
+    def pickItems(self, inputMat):
+        nr_diamonds = self.matsize - 2*self.diamondsize
+        start_offset = self.diamondsize
+        rowEndList = [i + start_offset for i in range(nr_diamonds)]
+        rowStartList = [i-self.diamondsize for i in rowEndList] 
+        columnStartList = [i+1 for i in rowEndList]
+        columnEndList = [i+self.diamondsize for i in columnStartList]
+        l = [ inputMat[i:j,k:l] for i,j,k,l in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
+        l = [ tf.reduce_mean(i) for i in l ]
+        return tf.stack(l)
+
+def customLossWrapper(pMatrixsize, pDiamondsize):
+    def customLoss(y_true, y_pred):
+        #compute the score from the predicted (flattened) upper triangular matrix
+        predScore = CustomReshapeLayer(matsize=pMatrixsize)(y_pred)
+        predScore = TadInsulationScoreLayer(matsize=pMatrixsize,diamondsize=pDiamondsize)(predScore)
+        #compute mean squared error for TAD insulation score
+        predLoss = tf.square(y_true - predScore)
+        predLoss = tf.reduce_mean(predLoss)
+        return predLoss
+    return customLoss

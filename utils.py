@@ -56,7 +56,7 @@ def getChromSizesFromCooler(pCoolerFilePath):
         print(e)
     return chromSizes
 
-def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
+def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr, pChromSize=None):
     #bin chromatin factor loaded from bigwig file pBigwigFileName with bin size pBinSizeInt for chromosome pChromStr
     binArray = None
     properFileType = False
@@ -72,7 +72,10 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr):
             msg = msg.format(chrom, pBigwigFileName)
             raise SystemExit(msg)
         #compute signal values (stats) over resolution-sized bins
-        chromsize = bigwigFile.chroms(chrom)
+        if pChromSize is None:
+            chromsize = bigwigFile.chroms(chrom)
+        else:
+            chromsize = pChromSize
         chromStartList = list(range(0,chromsize,pBinSizeInt))
         chromEndList = list(range(pBinSizeInt,chromsize,pBinSizeInt))
         chromEndList.append(chromsize)
@@ -363,12 +366,12 @@ def readSequencesPerId(pDNAFastaFileStr, pIdentifier):
         print(msg)
     return sequenceStr
 
-def encodeSequence(pSequenceStr):
+def encodeSequence(pSequenceStr, pClasses=None):
     #one-hot encoding for DNA sequences
     if pSequenceStr is None or pSequenceStr == "":
         msg = "Aborting. DNA sequence is empty"
         raise SystemExit(msg)
-    mlb = MultiLabelBinarizer()
+    mlb = MultiLabelBinarizer(classes=pClasses)
     encodedSequenceArray = mlb.fit_transform(pSequenceStr).astype("uint8")
     if encodedSequenceArray.shape[1] != 4:
         msg = "Warning: DNA sequence contains more than the 4 nucleotide symbols A,C,G,T\n"
@@ -380,6 +383,8 @@ def encodeSequence(pSequenceStr):
 def fillEncodedSequence(pEncodedSequenceArray, pBinSizeInt):
     #fill one-hot encoded sequence array with zero vectors such that
     #the length matches the number of bins
+    if pBinSizeInt is None or not isinstance(pBinSizeInt, int):
+        return
     actualLengthInt = pEncodedSequenceArray.shape[0] #here, length in basepairs
     targetLengthInt = int(np.ceil(actualLengthInt/pBinSizeInt))*pBinSizeInt #in basepairs
     returnArray = None
@@ -933,3 +938,46 @@ def getCorrelation(pData, pDistanceField, pTargetField, pPredictionField, pCorrM
     div = pData[pDistanceField].max()
     indices = indices / div 
     return indices, values
+
+def getChromPrefixBigwig(pBigwigFileName):
+    '''
+    check if the chromosome names in the bigwig file 
+    start with 'chr' or not; e.g. 'chr10' vs. '10'
+    '''
+    try:
+        bigwigFile = pyBigWig.open(pBigwigFileName)
+        chromSizeDict = bigwigFile.chroms()
+        chromNameList = [entry for entry in chromSizeDict]
+    except Exception as e:
+        raise(e) 
+    prefix = None
+    if chromNameList is not None and len(chromNameList) > 0 and str(chromNameList[0]).startswith("chr"):
+        prefix = "chr"
+    elif chromNameList is not None and len(chromNameList) > 0:
+        prefix = ""
+    else:
+        msg = "No valid entries found in bigwig file {:s}"
+        msg = msg.format(pBigwigFileName)
+        raise ValueError(msg)
+    return prefix
+
+def getChromPrefixCooler(pCoolerFileName):
+    '''
+    check if the chromosomes in the cooler file 
+    start with 'chr' or not; e.g. 'chr10' vs. '10'
+    '''
+    try:
+        coolerMatrix = cooler.Cooler(pCoolerFileName) 
+        chromSizes = coolerMatrix.chromsizes.to_dict()
+        chromNameList = [entry for entry in chromSizes]
+    except Exception as e:
+        raise(e)
+    prefix = None
+    if chromNameList is not None and len(chromNameList) > 0 and str(chromNameList[0]).startswith("chr"):
+        prefix = "chr"
+    elif  chromNameList is not None and len(chromNameList) > 0:
+        prefix = ""
+    else:
+        msg = "No valid entries found in cooler file {:s}"
+        msg = msg.format(pCoolerFileName)
+        raise ValueError(msg) 

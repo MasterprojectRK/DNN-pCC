@@ -41,60 +41,25 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 #write tfRecord to disk
-def writeTFRecord(pChromFactorsArray, pDNASequenceArray, pTargetMatricesArray, pFilename):
-    batches = set()
-    if isinstance(pChromFactorsArray, np.ndarray) \
-            and not len(pChromFactorsArray.shape) == 3:
-        msg = "Chrom factors array wrong shape"
-        print(msg)
-        return
-    elif isinstance(pChromFactorsArray, np.ndarray):
-        batches.add( pChromFactorsArray.shape[0] )
-    if isinstance(pDNASequenceArray, np.ndarray) \
-                and not len(pDNASequenceArray.shape) == 3:
-        msg = "DNA seq. array wrong shape"
-        print(msg)
-        return
-    elif isinstance(pDNASequenceArray, np.ndarray):
-        batches.add( pDNASequenceArray.shape[0] )
-    if isinstance(pTargetMatricesArray, np.ndarray) \
-                and not len(pTargetMatricesArray.shape) == 2:
-        msg = "target matrices array wrong shape"
-        print(msg)
-        return
-    elif isinstance(pTargetMatricesArray, np.ndarray):
-        batches.add( pTargetMatricesArray.shape[0] )
-    
-    if len(batches) != 1:
-        msg = "no. of batches wrong or no data"
-        print(msg)
-        return
-    
+def writeTFRecord(pFilename, pRecordDict):
     if not isinstance(pFilename, str):
-        msg = "Filename must be a string"
-        print(msg)
         return
-    if not isinstance(pChromFactorsArray, np.ndarray) \
-            and not isinstance(pDNASequenceArray, np.ndarray) \
-            and not isinstance(pTargetMatricesArray, np.ndarray):
-        msg = "Nothing to write"
-        print(msg)
+    if not isinstance(pRecordDict, dict):
         return
+    for key in pRecordDict:
+        if not isinstance(pRecordDict[key], np.ndarray):
+            return
+    batches = set()
+    for key in pRecordDict:
+        batches.add(pRecordDict[key].shape[0])
+    if len(batches) > 1:
+        msg = "Batch sizes are not equal"
+        raise ValueError(msg)
     
     with tf.io.TFRecordWriter(pFilename, options="GZIP") as writer:
         for i in range(list(batches)[0]):
             feature = dict()
-            if isinstance(pChromFactorsArray, np.ndarray):
-                feature['features'] =  _bytes_feature( pChromFactorsArray[i].flatten().tostring() ),
-            else:
-                feature['features'] = _bytes_feature( np.array([0]).tostring() )
-            if isinstance(pTargetMatricesArray, np.ndarray):
-                feature['targets'] =  _bytes_feature( pTargetMatricesArray[i].flatten().tostring() )
-            else:
-                feature['targets'] = _bytes_feature( np.array([0]).tostring() )
-            if isinstance(pDNASequenceArray, np.ndarray):
-                feature['dna'] = _bytes_feature( pDNASequenceArray[i].flatten().tostring() )
-            else:
-                feature['dna'] = _bytes_feature( np.array([0]).tostring() )
+            for key in pRecordDict:
+                feature[key] = _bytes_feature( pRecordDict[key][i].flatten().tostring() )
             example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(example.SerializeToString())
