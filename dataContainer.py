@@ -267,6 +267,7 @@ class DataContainer():
                 factorData.append(data["factorArray"])
                 matrixData.append(data["matrixArray"])
                 sequenceData.append(data["sequenceArray"])
+            recordDict = dict()
             if not None in factorData:
                 recordDict["factorData"] = np.array(factorData)
             if not None in sequenceData:
