@@ -981,3 +981,4 @@ def getChromPrefixCooler(pCoolerFileName):
         msg = "No valid entries found in cooler file {:s}"
         msg = msg.format(pCoolerFileName)
         raise ValueError(msg) 
+    return prefix
