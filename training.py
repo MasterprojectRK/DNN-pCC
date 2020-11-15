@@ -1,6 +1,7 @@
 import utils
 import models
 import records
+import dataContainer
 import click
 import tensorflow as tf
 import numpy as np
@@ -150,6 +151,11 @@ def training(trainmatrices,
         flankingsize = windowsize
         paramDict["flankingsize"] = windowsize
 
+    trainChromNameList = trainchromosomes.rstrip().split(" ")  
+    trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
+
+    validationChromNameList = validationchromosomes.rstrip().split(" ")
+    validationChromNameList = sorted([x.lstrip("chr") for x in validationChromNameList])
 
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
@@ -165,119 +171,72 @@ def training(trainmatrices,
         msg = msg.format(len(validationmatrices), len(validationchromatinpaths))
         raise SystemExit(msg) 
 
-    #extract chromosome names and size from the input
-    trainChromNameList = trainchromosomes.rstrip().split(" ")  
-    trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
-    #check if all requested chroms are present in all train matrices
-    trainMatricesDict = utils.checkGetChromsPresentInMatrices(trainmatrices,trainChromNameList)
-    #check if all requested chroms are present in all bigwig files
-    #and check if the chromosome lengths are equal for all bigwig files in each folder
-    trainChromFactorsDict = utils.checkGetChromsPresentInFactors(trainchromatinpaths,trainChromNameList)
-    #check if the chromosome lengths from the bigwig files match the ones from the matrices
-    utils.checkChromSizesMatching(trainMatricesDict, trainChromFactorsDict, trainChromNameList)
-
-    #repeat the steps above for the validation matrices and chromosomes
-    validationChromNameList = validationchromosomes.rstrip().split(" ")
-    validationChromNameList = sorted([x.lstrip("chr") for x in validationChromNameList])
-    validationMatricesDict = utils.checkGetChromsPresentInMatrices(validationmatrices, validationChromNameList)
-    validationChromFactorsDict = utils.checkGetChromsPresentInFactors(validationchromatinpaths, validationChromNameList)
-    utils.checkChromSizesMatching(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
-
     #check if chosen model type matches inputs
     modelTypeStr = checkSetModelTypeStr(modeltype, sequencefile)
     paramDict["modeltype"] = modelTypeStr
 
-    #load sparse Hi-C matrices per chromosome
-    #scale and normalize, if requested
-    print("Loading Training matrix/matrices")
-    utils.loadMatricesPerChrom(trainMatricesDict, scalematrix, windowsize)
-    print("\nLoading Validation matrix/matrices")
-    utils.loadMatricesPerChrom(validationMatricesDict, scalematrix, windowsize)
+    #prepare the training data containers. No data is loaded yet.
+    traindataContainerList = []
+    for chrom in trainChromNameList:
+        for matrix, chromatinpath in zip(trainmatrices, trainchromatinpaths):
+            container = dataContainer.DataContainer(chromosome=chrom,
+                                                    matrixfilepath=matrix,
+                                                    chromatinFolder=chromatinpath,
+                                                    sequencefilepath=sequencefile)
+            traindataContainerList.append(container)
 
-    #load, bin and aggregate the chromatin factors into a numpy array
-    #of size #matrix_size_in_bins x nr_chromatin_factors
-    #loading is per corresponding training matrix (per folder)
-    #and the bin sizes also correspond to the matrices
-    print("\nLoading Chromatin factors for training")
-    utils.loadChromatinFactorDataPerMatrix(trainMatricesDict,trainChromFactorsDict, trainChromNameList, pScaleFactors=scalefactors, pClampFactors=clampfactors)
-    print("\nLoading Chromatin factors for validation")
-    utils.loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList, pScaleFactors=scalefactors, pClampFactors=clampfactors)
-    
-    if debugstate is not None:
-        for plotType in ["box", "line"]:
-            utils.plotChromatinFactors(pFactorDict=trainChromFactorsDict,
-                                        pMatrixDict=trainMatricesDict,
-                                        pOutputPath=outputpath,
-                                        pPlotType=plotType,
-                                        pFigureType=figuretype)
-            utils.plotChromatinFactors(pFactorDict=validationChromFactorsDict,
-                                        pMatrixDict=validationMatricesDict,
-                                        pOutputPath=outputpath,
-                                        pPlotType=plotType,
-                                        pFigureType=figuretype)
+    #prepare the validation data containers. No data is loaded yet.
+    validationdataContainerList = []
+    for chrom in validationChromNameList:
+        for matrix, chromatinpath in zip(validationmatrices, validationchromatinpaths):
+            container = dataContainer.DataContainer(chromosome=chrom,
+                                                    matrixfilepath=matrix,
+                                                    chromatinFolder=chromatinpath,
+                                                    sequencefilepath=sequencefile)
+            validationdataContainerList.append(container)
 
-    #check if DNA sequences for all chroms are there and correspond with matrices/chromatin factors
-    #do not load them in memory yet, only store paths and sequence ids in the dicts
-    #the generator can then load sequence data as required
-    utils.getCheckSequences(trainMatricesDict,trainChromFactorsDict, sequencefile)
-    utils.getCheckSequences(validationMatricesDict, validationChromFactorsDict, sequencefile)
+    #now load the data and write TFRecords, one container at a time.
+    if len(traindataContainerList) == 0:
+        return #nothing to do
+    container0 = traindataContainerList[0]
+    tfRecordFilenames = []
+    nr_samples_list = []
+    for container in traindataContainerList + validationdataContainerList:
+        container.loadData()
+        if not container0.checkCompatibility(container):
+            msg = "Aborting. Incompatible data"
+        tfRecordFilenames.append(container.writeTFRecord(pWindowsize=windowsize,
+                                                        pOutfolder=outputpath,
+                                                        pFlankingsize=flankingsize,
+                                                        pMaxdist=maxdist,
+                                                        pRecordSize=recordsize))
+        if debugstate is not None:
+            if isinstance(debugstate, int):
+                idx = debugstate
+            else:
+                idx = None
+            container.plotFeatureAtIndex(idx=idx, 
+                                         flankingsize=flankingsize, 
+                                         windowsize=windowsize, 
+                                         maxdist=maxdist,
+                                         outpath=outputpath,
+                                         figuretype=figuretype)
+        nr_samples_list.append(container.getNumberSamples(flankingsize=flankingsize, windowsize=windowsize))
+        container.unloadData()
+    traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
+    validationdataRecords = [item for sublist in tfRecordFilenames[len(traindataContainerList):] for item in sublist]    
     
-    #get number and names of chromatin factors 
-    #and save to parameters dictionary
-    nr_factors = max([trainChromFactorsDict[folder]["nr_factors"] for folder in trainChromFactorsDict])
-    paramDict["nr_factors"] = nr_factors
-    factorsNameList = []
-    for folder in trainChromFactorsDict:
-        factorsNameList.extend([name for name in trainChromFactorsDict[folder]["bigwigs"]])
-    factorsNameList = sorted(list(set(factorsNameList)))
-    for i, factor in enumerate(factorsNameList):
-        paramDict["chromFactor_" + str(i)] = factor
-    #get binsize and save to parameters dictionary
-    binsize = max([trainMatricesDict[mName]["binsize"] for mName in trainMatricesDict])
-    paramDict["binsize"] = binsize
-    #get number of symbols and save to parameters dictionary
+
+    #because of compatibility checks above, just use data from first container
+    binsize = container0.binsize
+    nr_factors = container0.nr_factors
+    sequenceSymbols = container0.sequenceSymbols
     nr_symbols = None
-    if sequencefile is not None:
-        nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
-    paramDict["nr_symbols"] = nr_symbols
-
-
-    #generators for training and validation data
-    trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
-                                                        factorDict=trainChromFactorsDict,
-                                                        batchsize=recordsize,
-                                                        windowsize=windowsize,
-                                                        flankingsize=flankingsize,
-                                                        binsize=binsize,
-                                                        shuffle=False, #done in dataset)
-                                                        maxdist=maxdist)
-    validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
-                                                        factorDict=validationChromFactorsDict,
-                                                        batchsize=recordsize,
-                                                        windowsize=windowsize,
-                                                        flankingsize=flankingsize,
-                                                        binsize=binsize,
-                                                        shuffle=False,
-                                                        maxdist=maxdist)    
-
-    #write the training data to disk as tfRecord
-    trainFilenameList = ["trainfile_{:03d}.tfrecord".format(i+1) for i in range(len(trainDataGenerator))]
-    trainFilenameList = [os.path.join(outputpath, x) for x in trainFilenameList]
-    nr_samples = 0
-    for i, batch in enumerate(tqdm(trainDataGenerator,desc="generating training data")):
-        if len(batch[0]) == 1:
-            records.writeTFRecord(batch[0][0], None, batch[1], trainFilenameList[i])
-        else:
-            records.writeTFRecord(batch[0][0], batch[0][1], batch[1], trainFilenameList[i])
-        nr_samples += batch[1].shape[0]
-    #write the validation data to disk as tfRecord
-    validationFilenameList = ["validationfile_{:03d}.tfrecord".format(i+1) for i in range(len(validationDataGenerator))]
-    validationFilenameList = [os.path.join(outputpath, x) for x in validationFilenameList]
-    for i, batch in enumerate(tqdm(validationDataGenerator, desc="generating validation data")):
-        if len(batch[0]) == 1:
-            records.writeTFRecord(batch[0][0], None, batch[1], validationFilenameList[i])
-        else:
-            records.writeTFRecord(batch[0][0], batch[0][1], batch[1], validationFilenameList[i])
+    if isinstance(sequenceSymbols, set):
+        nr_symbols = len(sequenceSymbols)
+    nr_trainingSamples = sum(nr_samples_list[0:len(traindataContainerList)])
+    storedFeaturesDict = container0.storedFeatures
+    
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
@@ -286,32 +245,12 @@ def training(trainmatrices,
                                     pNrSymbols=nr_symbols,
                                     pFlankingSize=flankingsize,
                                     pMaxDist=maxdist)
-    #create optimizer
-    kerasOptimizer = None
-    if optimizer == "SGD":
-        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=learningrate)
-    elif optimizer == "Adam":
-        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
-    elif optimizer == "RMSprop":
-        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=learningrate)
-    else:
-        raise NotImplementedError("unknown optimizer")
-    #create loss
-    loss_fn = None
-    if loss == "MSE":
-        loss_fn = tf.keras.losses.MeanSquaredError()
-    elif loss == "Huber":
-        loss_fn = tf.keras.losses.Huber(delta=2.5)
-    elif loss == "MAE":
-        loss_fn = tf.keras.losses.MeanAbsoluteError()
-    elif loss == "MAPE":
-        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
-    elif loss == "MSLE":
-        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
-    elif loss == "Cosine":
-        loss_fn = tf.keras.losses.CosineSimilarity()
-    else:
-        raise NotImplementedError("unknown loss function")
+    #define optimizer
+    kerasOptimizer = getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
+    
+    # define loss(es)
+    loss_fn = getLosses(pLossStr = loss)
+
     #compile the model
     model.compile(optimizer=kerasOptimizer, 
                  loss=loss_fn)
@@ -319,7 +258,7 @@ def training(trainmatrices,
 
     #callbacks to check the progress etc.
     tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = int(np.ceil(nr_samples / batchsize) * savefreq)
+    saveFreqInt = int(np.ceil(nr_trainingSamples / batchsize) * savefreq)
     checkpointFilename = os.path.join(outputpath, "checkpoint_{epoch:05d}.h5")
     checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
                                                         monitor="val_loss",
@@ -352,27 +291,18 @@ def training(trainmatrices,
     
     #build input streams
     shuffleBufferSize = 3*recordsize
-    targSize = int( windowsize* (windowsize+1) / 2 )
-    if maxdist is not None:
-        targSize -= int( (windowsize-maxdist)*(windowsize-maxdist+1) / 2 )
-    shapeDict = dict()
-    shapeDict["feats"] = (windowsize + 2*flankingsize, nr_factors)
-    shapeDict["targs"] = (targSize, )
-
-    if sequencefile is not None:
-        shapeDict["dna"] = (windowsize*binsize,nr_symbols)
-    trainDs = tf.data.TFRecordDataset(trainFilenameList, 
+    trainDs = tf.data.TFRecordDataset(traindataRecords, 
                                         num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                         compression_type="GZIP")
-    trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    trainDs = trainDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.batch(batchsize)
     trainDs = trainDs.repeat(numberepochs)
     trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
-    validationDs = tf.data.TFRecordDataset(validationFilenameList, 
+    validationDs = tf.data.TFRecordDataset(validationdataRecords, 
                                             num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                             compression_type="GZIP")
-    validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    validationDs = validationDs.map(lambda x: records.parse_function(x, storedFeaturesDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
     validationDs = validationDs.batch(batchsize)
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -381,7 +311,7 @@ def training(trainmatrices,
               epochs= numberepochs,
               validation_data= validationDs,
               callbacks= callback_fns,
-              steps_per_epoch= int(np.ceil(nr_samples / batchsize))
+              steps_per_epoch= int(np.ceil(nr_trainingSamples / batchsize))
             )
 
     #store the trained network
@@ -394,12 +324,9 @@ def training(trainmatrices,
 
     #delete train- and validation records, if debugstate not set
     if debugstate is None or debugstate=="Figures":
-        for trainfile in tqdm(trainFilenameList, desc="Deleting training record files"):
-            if os.path.exists(trainfile):
-                os.remove(trainfile)
-        for validationfile in tqdm(validationFilenameList, desc="Deleting validation record files"):
-            if os.path.exists(validationfile):
-                os.remove(validationfile)
+        for record in tqdm(traindataRecords + validationdataRecords, desc="Deleting TFRecord files"):
+            if os.path.exists(record):
+                os.remove(record)
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
     modeltypeStr = pModelTypeStr
@@ -412,6 +339,36 @@ def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
         msg += "Changed model type to >sequence<"
         print(msg)
     return modeltypeStr
+
+def getOptimizer(pOptimizerString, pLearningrate):
+    kerasOptimizer = None
+    if pOptimizerString == "SGD":
+        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=pLearningrate)
+    elif pOptimizerString == "Adam":
+        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=pLearningrate)
+    elif pOptimizerString == "RMSprop":
+        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=pLearningrate)
+    else:
+        raise NotImplementedError("unknown optimizer")
+    return kerasOptimizer
+
+def getLosses(pLossStr):
+    loss_fn = None
+    if pLossStr == "MSE":
+        loss_fn = tf.keras.losses.MeanSquaredError()
+    elif pLossStr == "Huber":
+        loss_fn = tf.keras.losses.Huber(delta=2.5)
+    elif pLossStr == "MAE":
+        loss_fn = tf.keras.losses.MeanAbsoluteError()
+    elif pLossStr == "MAPE":
+        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
+    elif pLossStr == "MSLE":
+        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
+    elif pLossStr == "Cosine":
+        loss_fn = tf.keras.losses.CosineSimilarity()
+    else:
+        raise NotImplementedError("unknown loss function")
+    return loss_fn
 
 
 if __name__ == "__main__":
