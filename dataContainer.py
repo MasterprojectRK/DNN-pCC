@@ -3,6 +3,7 @@ import records
 import os
 import numpy as np
 from Bio import SeqIO
+from tensorflow import dtypes as tfdtypes
 
 class DataContainer():
     def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
@@ -91,6 +92,9 @@ class DataContainer():
                                                                     pChromStr=chromname,
                                                                     pChromSize=self.chromSize_factors)
         self.FactorDataArray = np.transpose(self.FactorDataArray)
+        msg = "Loaded {:d} chromatin features from folder {:s}"
+        msg = msg.format(self.nr_factors, self.chromatinFolder)
+        print(msg)
             
     def __loadMatrixData(self):
         #load Hi-C matrix from cooler file
@@ -111,6 +115,7 @@ class DataContainer():
             msg += "Matrix: {:d} -- Bigwig files: {:d}"
             msg = msg.format(chromsize_matrix, self.chromSize_factors)
             raise ValueError(msg)
+        self.chromSize_matrix = chromsize_matrix
         #ensure that binsizes for matrix and factors (if given) match
         if self.binsize is None or self.binsize == binsize:
             self.binsize = binsize
@@ -120,6 +125,11 @@ class DataContainer():
             msg += "Matrix: {:d} -- Binned chromatin factors {:d}"
             msg = msg.format(binsize, self.binsize)
             raise ValueError(msg)
+        msg = "Loaded chromosome {:s} from cooler matrix {:s}\n"
+        msg = msg.format(self.chromosome, self.matrixfilepath)
+        msg += "Matrix shape {:d}x{:d} -- min {:d} -- max {:d}"
+        msg = msg.format(self.sparseHiCMatrix.shape[0], self.sparseHiCMatrix.shape[1], int(self.sparseHiCMatrix.min()), int(self.sparseHiCMatrix.max()))
+        print(msg)
 
     def __loadSequenceData(self):
         #load DNA sequence from Fasta file
@@ -160,9 +170,13 @@ class DataContainer():
         #load the data    
         seqStr = records[chromname].seq.upper()
         self.sequenceSymbols = set(list(seqStr))
+        originalLength = len(seqStr)
         self.sequenceArray = utils.fillEncodedSequence(utils.encodeSequence(seqStr, self.sequenceSymbols), self.binsize)
         del seqStr
         records.close()
+        msg = "Loaded DNA sequence from {:s} -- Len {:d} -- Symbols {:s}"
+        msg = msg.format(self.sequencefilepath, originalLength, ", ".join(list(self.sequenceSymbols)))
+        print(msg)
     
     def __unloadFactorData(self):
         #unload chromatin factor data to save memory, but do not touch metadata 
@@ -316,8 +330,6 @@ class DataContainer():
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, maxdist)]
         else: #triangles, i. e. full submatrices
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(windowsize)]
-        else: #trapezoids, i.e. distance limited submatrices
-            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, maxdist)]
         trainmatrix = np.nan_to_num(trainmatrix)
         return trainmatrix
     
