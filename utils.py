@@ -96,7 +96,15 @@ def binChromatinFactor(pBigwigFileName, pBinSizeInt, pChromStr, pChromSize=None)
     return binArray
 
 def scaleArray(pArray):
-    # min-max scaling (0...1) for numpy arrays 
+    '''
+    min-max scaling for numpy arrays and sparse csr matrices
+
+    Parameters:
+    pArray (np.ndarray or sparse.csr_matrix): array to scale
+
+    Returns:
+    array scaled to value range [0..1]
+    ''' 
     if pArray is None or pArray.size == 0:
         msg = "cannot normalize empty array"
         print(msg)
