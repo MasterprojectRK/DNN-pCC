@@ -256,7 +256,8 @@ class DataContainer():
         samples_per_file = [target_ct]*(nr_files-1) + [nr_samples-(nr_files-1)*target_ct]
         sample_indices = [sum(samples_per_file[0:i]) for i in range(len(samples_per_file)+1)] 
         #write the single files
-        recordfiles = [os.path.join(pOutfolder, "{:03d}.tfrecord".format(i + 1)) for i in range(nr_files)]
+        folderName = self.chromatinFolder.rstrip("/").replace("/","-")
+        recordfiles = [os.path.join(pOutfolder, "{:s}_{:s}_{:03d}.tfrecord".format(folderName, str(self.chromosome), i + 1)) for i in range(nr_files)]
         for recordfile, firstIndex, lastIndex in zip(recordfiles, sample_indices, sample_indices[1:]):
             factorData = []
             matrixData = []
