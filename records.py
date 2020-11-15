@@ -1,37 +1,27 @@
 import tensorflow as tf
-from tensorflow.python.keras import backend
 import numpy as np
 
 #compare following tutorial https://medium.com/@moritzkrger/speeding-up-keras-with-tfrecord-datasets-5464f9836c36
 
 #parse serialized input to tensors
-def parse_function(example_proto, shapeDict):
-    feats = None
-    targs = None
-    dna = None
-    features = {"features": tf.io.FixedLenFeature((), tf.string),
-                "targets": tf.io.FixedLenFeature((), tf.string),
-                "dna": tf.io.FixedLenFeature((), tf.string)}
-    parsed_features = tf.io.parse_single_example(example_proto, features)
-    if "feats" in shapeDict:
-        feats = tf.io.decode_raw(parsed_features['features'], tf.float64)
-        feats = tf.reshape(feats, shapeDict["feats"])
-    if "targs" in shapeDict:
-        targs = tf.io.decode_raw(parsed_features['targets'], tf.float64)
-        targs = tf.reshape(targs, shapeDict["targs"])
-    if "dna" in shapeDict:
-        dna = tf.io.decode_raw(parsed_features['dna'], tf.uint8)
-        dna = tf.reshape(dna, shapeDict["dna"])
-    retList = []
+def parse_function(example_proto, descriptionDict):
     featDict = dict()
-    if feats is not None:
-        featDict["feats"] = feats #chromatin features
-    if dna is not None:
-        featDict["dna"] = dna #dna sequence
+    targetDict = dict()
+    contents = [key for key in descriptionDict]
+    dtypes = [descriptionDict[key]["dtype"] for key in contents]
+    shapes = [descriptionDict[key]["shape"] for key in contents]
+    features = {key: tf.io.FixedLenFeature((), tf.string) for key in contents}
+    parsed_features = tf.io.parse_single_example(example_proto, features)
+    for name, dtype, shape in zip(contents, dtypes, shapes):
+        if name.startswith("out_"):
+            targetDict[name] = tf.reshape( tf.io.decode_raw(parsed_features[name], dtype), shape)
+        else:
+            featDict[name] = tf.reshape( tf.io.decode_raw(parsed_features[name], dtype), shape)
+    retList = []
     if len(featDict) > 0:
         retList.append(featDict)
-    if targs is not None:
-        retList.append(targs)   #target submatrices
+    if len(targetDict) > 0:
+        retList.append(targetDict)
     return tuple(retList)
 
 # helper functions from tensorflow TFRecord docs

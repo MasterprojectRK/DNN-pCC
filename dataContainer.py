@@ -275,7 +275,7 @@ class DataContainer():
             if not None in sequenceData:
                 recordDict["sequenceData"] = np.array(sequenceData)
             if not None in matrixData:
-                recordDict["matrixData"] = np.array(matrixData)
+                recordDict["out_matrixData"] = np.array(matrixData)
             records.writeTFRecord(pFilename=recordfile, pRecordDict=recordDict)
         self.storedFiles = recordfiles
         self.storedFeatures = [key for key in recordDict]
