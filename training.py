@@ -202,7 +202,7 @@ def training(trainmatrices,
     tfRecordFilenames = []
     nr_samples_list = []
     for container in traindataContainerList + validationdataContainerList:
-        container.loadData()
+        container.loadData(scaleFeatures=scalefactors, scaleTargets=scalematrix)
         if not container0.checkCompatibility(container):
             msg = "Aborting. Incompatible data"
         tfRecordFilenames.append(container.writeTFRecord(pWindowsize=windowsize,

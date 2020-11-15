@@ -29,7 +29,7 @@ class DataContainer():
         self.storedFeatures = None
         self.storedFiles = None
 
-    def __loadFactorData(self, ignoreChromLengths=False):
+    def __loadFactorData(self, ignoreChromLengths=False, scaleFeatures=False):
         #load chromatin factor data from bigwig files
         if self.chromatinFolder is None:
             return
@@ -46,8 +46,6 @@ class DataContainer():
             msg = msg.format(self.chromatinFolder)
             print(msg)
             return
-        self.factorNames = [os.path.splitext(name)[0] for name in bigwigFileList]
-        self.nr_factors = len(self.factorNames)
         #check the chromosome name prefixes (e.g. "" or "chr") and sizes
         chromSizeList = []
         prefixDict_factors = dict()
@@ -60,7 +58,6 @@ class DataContainer():
                 msg = str(e) + "\n"
                 msg += "Could not load data from bigwigfile {}".format(bigwigFile) 
                 raise ValueError(msg)
-        self.prefixDict_factors = prefixDict_factors
         #the chromosome lengths should be equal in all bigwig files
         if len(set(chromSizeList)) != 1 and not ignoreChromLengths:
             msg = "Invalid data. Chromosome lengths differ in bigwig files:"
@@ -68,35 +65,46 @@ class DataContainer():
                 msg += "{:s}: {:d}\n".format(filename, chromSizeList[i])
             raise ValueError(msg)
         elif len(set(chromSizeList)) != 1 and ignoreChromLengths:
-            self.chromSize_factors = min(chromSizeList)
+            chromSize_factors = min(chromSizeList)
         else:
-            self.chromSize_factors = chromSizeList[0]
+            chromSize_factors = chromSizeList[0]
         #the chromosome lengths of matrices and bigwig files must be equal
         if self.chromSize_matrix is not None \
-                and self.chromSize_matrix != self.chromSize_factors:
+                and self.chromSize_matrix != chromSize_factors:
             msg = "Chrom lengths not equal between matrix and bigwig files\n"
-            msg += "Matrix: {:d} -- Factors: {:d}".format(self.chromSize_matrix, self.chromSize_factors)
+            msg += "Matrix: {:d} -- Factors: {:d}".format(self.chromSize_matrix, chromSize_factors)
             raise ValueError(msg)
         if self.chromSize_sequence is not None \
-                and self.chromSize_sequence != self.chromSize_factors:
+                and self.chromSize_sequence != chromSize_factors:
             msg = "Chrom lengths not equal between sequence and bigwig files\n"
-            msg += "Sequence: {:d} -- Factors: {:d}".format(self.chromSize_sequence, self.chromSize_factors)
+            msg += "Sequence: {:d} -- Factors: {:d}".format(self.chromSize_sequence, chromSize_factors)
             raise ValueError(msg)
         #load the data into memory now
+        self.factorNames = [os.path.splitext(name)[0] for name in bigwigFileList]
+        self.nr_factors = len(self.factorNames)
+        self.prefixDict_factors = prefixDict_factors
+        self.chromSize_factors = chromSize_factors
         nr_bins = int( np.ceil(self.chromSize_factors / self.binsize) )
         self.FactorDataArray = np.empty(shape=(len(bigwigFileList),nr_bins))
+        msg = "Loaded {:d} chromatin features from folder {:s}\n"
+        msg = msg.format(self.nr_factors, self.chromatinFolder)
         for i, bigwigFile in enumerate(bigwigFileList):
             chromname = self.prefixDict_factors[bigwigFile] + self.chromosome
-            self.FactorDataArray[i] = utils.binChromatinFactor(pBigwigFileName=bigwigFile,
-                                                                    pBinSizeInt=self.binsize,
-                                                                    pChromStr=chromname,
-                                                                    pChromSize=self.chromSize_factors)
+            tmpArray = utils.binChromatinFactor(pBigwigFileName=bigwigFile,
+                                                pBinSizeInt=self.binsize,
+                                                pChromStr=chromname,
+                                                pChromSize=self.chromSize_factors)
+            if scaleFeatures:
+                tmpArray = utils.scaleArray(tmpArray)
+            self.FactorDataArray[i] = tmpArray
+            nr_nonzero_abs = np.count_nonzero(tmpArray)
+            nr_nonzero_perc = nr_nonzero_abs / tmpArray.size * 100
+            msg += "{:s} - min. {:.3f} - max {:.3f} - nonzero {:d} ({:.2f}%)\n"
+            msg = msg.format(bigwigFile, tmpArray.min(), tmpArray.max(), nr_nonzero_abs, nr_nonzero_perc)
         self.FactorDataArray = np.transpose(self.FactorDataArray)
-        msg = "Loaded {:d} chromatin features from folder {:s}"
-        msg = msg.format(self.nr_factors, self.chromatinFolder)
         print(msg)
             
-    def __loadMatrixData(self):
+    def __loadMatrixData(self, scaleMatrix=False):
         #load Hi-C matrix from cooler file
         if self.matrixfilepath is None:
             return
@@ -109,6 +117,9 @@ class DataContainer():
             msg = "Error: Could not load data from Hi-C matrix {:s}"
             msg = msg.format(self.matrixfilepath)
             raise ValueError(msg)
+        #scale to 0..1, if requested
+        if scaleMatrix:
+            sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)       
         #ensure that chrom sizes for matrix and factors are the same
         if self.chromSize_factors is not None and self.chromSize_factors != chromsize_matrix:
             msg = "Chromsize of matrix does not match bigwig files\n"
@@ -196,9 +207,9 @@ class DataContainer():
         self.__unloadMatrixData
         self.__unloadSequenceData
     
-    def loadData(self):
-        self.__loadMatrixData()
-        self.__loadFactorData()
+    def loadData(self, scaleFeatures=False, scaleTargets=False):
+        self.__loadMatrixData(scaleMatrix=scaleTargets)
+        self.__loadFactorData(scaleFeatures=scaleFeatures)
         self.__loadSequenceData()
 
     def checkCompatibility(self, containerIterable):
