@@ -271,15 +271,19 @@ class DataContainer():
                 matrixData.append(data["matrixArray"])
                 sequenceData.append(data["sequenceArray"])
             recordDict = dict()
-            if not None in factorData:
+            storedFeaturesDict = dict()
+            if not any(elem is None for elem in factorData):
                 recordDict["factorData"] = np.array(factorData)
-            if not None in sequenceData:
+                storedFeaturesDict["factorData"] = {"shape": recordDict["factorData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["factorData"].dtype)}
+            if not any(elem is None for elem in sequenceData):
                 recordDict["sequenceData"] = np.array(sequenceData)
-            if not None in matrixData:
+                storedFeaturesDict["sequenceData"] = {"shape": recordDict["sequenceData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["sequenceData"].dtype)}
+            if not any(elem is None for elem in matrixData):
                 recordDict["out_matrixData"] = np.array(matrixData)
+                storedFeaturesDict["out_matrixData"] = {"shape": recordDict["out_matrixData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["out_matrixData"].dtype)}
             records.writeTFRecord(pFilename=recordfile, pRecordDict=recordDict)
         self.storedFiles = recordfiles
-        self.storedFeatures = [key for key in recordDict]
+        self.storedFeatures = storedFeaturesDict
         return recordfiles
 
     def getNumberSamples(self, flankingsize, windowsize):
