@@ -312,7 +312,9 @@ class DataContainer():
         startInd = idx + flankingsize
         stopInd = startInd + windowsize
         trainmatrix = None
-        if maxdist >= windowsize: #triangles, i. e. full submatrices
+        if isinstance(maxdist, int) and maxdist < windowsize: #trapezoids, i.e. distance limited submatrices
+            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, maxdist)]
+        else: #triangles, i. e. full submatrices
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(windowsize)]
         else: #trapezoids, i.e. distance limited submatrices
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, maxdist)]
