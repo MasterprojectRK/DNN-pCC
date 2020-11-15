@@ -91,7 +91,7 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
         print(msg)
         return None
     model = Sequential()
-    model.add(Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="feats"))
+    model.add(Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="factorData"))
     #add the requested number of 1D convolutions
     for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
         convParamDict = dict()
@@ -118,7 +118,7 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
     nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
     nr_elements_capped = int( 1/2 * diff * (diff+1) )   
     nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
-    model.add(Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="output_layer"))
+    model.add(Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData"))
     return model
 
 def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols, pDropoutRate):
@@ -134,7 +134,7 @@ def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSiz
     nr_neurons2 = 881
     nr_neurons3 = 1690
     model1 = Sequential()
-    model1.add(Input(shape=(2*pFlankingSize + pWindowSize,pNrFactors), name="feats"))
+    model1.add(Input(shape=(2*pFlankingSize + pWindowSize,pNrFactors), name="factorData"))
     model1.add(Conv1D(filters=1, 
                      kernel_size=kernelWidth, 
                      activation="sigmoid",
@@ -153,7 +153,7 @@ def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSiz
     kernelSize1 = 6
     kernelSize2 = 10
     model2 = Sequential()
-    model2.add(Input(shape=(pWindowSize*pBinSizeInt,pNrSymbols), name="dna"))
+    model2.add(Input(shape=(pWindowSize*pBinSizeInt,pNrSymbols), name="sequenceData"))
     model2.add(Conv1D(filters=filters1, 
                       kernel_size=kernelSize1,
                       activation="relu",
