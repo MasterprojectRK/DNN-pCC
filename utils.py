@@ -263,7 +263,9 @@ def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
     return distNormalizedMatrix
 
-def plotChromatinFactors(pFactorDict, pMatrixDict, pOutputPath, pPlotType, pFigureType="png"):
+def plotChromatinFactors(pFactorArray, pFeatureNameList, 
+                            pChromatinFolder, pChrom, pBinsize, pStartbin,
+                            pOutputPath, pPlotType, pFigureType="png"):
     #plot box- or line plots of the chromatin factors stored in pFactorDict
     #the matrices are required to determine the binsize for the line plots
     if pPlotType == "box":
@@ -272,21 +274,18 @@ def plotChromatinFactors(pFactorDict, pMatrixDict, pOutputPath, pPlotType, pFigu
         plotFn = plotChromatinFactors_lineplots
     else:
         return
-    for folder in pFactorDict:
-        factorNames = [os.path.splitext(name)[0] for name in pFactorDict[folder]["bigwigs"]]
-        matrixName = pFactorDict[folder]["matrixName"]
-        binsize = pMatrixDict[matrixName]["binsize"]
-        for chrom in pFactorDict[folder]["data"]:
-            filename = "chromFactors_{:s}_{:s}_{:s}.{:s}".format(pPlotType, folder.rstrip("/").replace("/","-"), chrom, pFigureType)
-            filename = os.path.join(pOutputPath,filename)
-            plotTitle = "Chromosome {:s} | Dir. {:s}".format(chrom,folder)
-            plotFn(pChromFactorArray=pFactorDict[folder]["data"][chrom],
-                                            pFilename=filename, 
-                                            pBinSize=binsize,
-                                            pAxTitle=plotTitle, 
-                                            pFactorNames=factorNames)
+ 
+    filename = "chromFactors_{:s}_{:s}_{:s}.{:s}".format(pPlotType, pChromatinFolder.rstrip("/").replace("/","-"), str(pChrom), pFigureType)
+    filename = os.path.join(pOutputPath,filename)
+    plotTitle = "Chromosome {:s} | Dir. {:s}".format(str(pChrom),pChromatinFolder)
+    plotFn(pChromFactorArray=pFactorArray,
+                    pFilename=filename, 
+                    pBinSize=pBinsize,
+                    pStartbin=pStartbin,
+                    pAxTitle=plotTitle, 
+                    pFactorNames=pFeatureNameList)
 
-def plotChromatinFactors_boxplots(pChromFactorArray, pFilename, pBinSize=None, pAxTitle=None, pFactorNames=None):
+def plotChromatinFactors_boxplots(pChromFactorArray, pFilename, pBinSize=None, pStartbin=None, pAxTitle=None, pFactorNames=None):
     #store box plots of the chromatin factors in the array
     fig1, ax1 = plt.subplots()
     toPlotList = []
@@ -305,13 +304,19 @@ def plotChromatinFactors_boxplots(pChromFactorArray, pFilename, pBinSize=None, p
     fig1.tight_layout()
     fig1.savefig(pFilename)
 
-def plotChromatinFactors_lineplots(pChromFactorArray, pFilename, pBinSize, pAxTitle=None, pFactorNames=None):
+def plotChromatinFactors_lineplots(pChromFactorArray, pFilename, pBinSize, pStartbin, pAxTitle=None, pFactorNames=None):
     #plot chromatin factors line plots
     #for debugging purposes only, not for production use
     winsize = pChromFactorArray.shape[0]
     nr_subplots = pChromFactorArray.shape[1]
     x_axis_values = np.arange(winsize) * pBinSize
-    fig1, axs1 = plt.subplots(nr_subplots, 1, sharex = True, figsize=(int(max(x_axis_values)/2000000),3*nr_subplots))
+    figsizeX = max(6, int(max(x_axis_values)/2000000))
+    figsizeX = min(100, figsizeX)
+    figsizeY = max(6, 3*nr_subplots)
+    figsizeY = min(100, figsizeY)
+    if isinstance(pStartbin, int):
+        x_axis_values += pStartbin * pBinSize
+    fig1, axs1 = plt.subplots(nr_subplots, 1, sharex = True, figsize=(figsizeX, figsizeY))
     for i in range(nr_subplots):
         axs1[i].plot(x_axis_values, pChromFactorArray[:,i])
         axs1[i].grid(True)

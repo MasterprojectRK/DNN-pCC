@@ -15,7 +15,7 @@ class DataContainer():
         self.sparseHiCMatrix = None
         self.sequenceArray = None
         self.binsize = None
-        if matrixfilepath is None: #otherwise it will be defined by the Hi-C matrix itself
+        if matrixfilepath is None: #otherwise it will be defined by the Hi-C matrix itself upon loading
             self.binsize = binsize
         self.factorNames = None
         self.prefixDict_factors = None
@@ -25,6 +25,8 @@ class DataContainer():
         self.chromSize_matrix = None
         self.chromSize_sequence = None
         self.sequenceSymbols = None
+        self.storedFeatures = None
+        self.storedFiles = None
 
     def __loadFactorData(self, ignoreChromLengths=False):
         #load chromatin factor data from bigwig files
@@ -32,7 +34,7 @@ class DataContainer():
             return
         #ensure that binsizes for matrix (if given) and factors match
         if self.binsize is None:
-            msg = "No binsize given; load Hi-C matrix first or explicitly specify binsize for the container"   
+            msg = "No binsize given; use a Hi-C matrix or explicitly specify binsize for the container"   
             raise ValueError(msg)
         ###load data for a specific chromsome
         #get the names of the bigwigfiles
@@ -43,7 +45,7 @@ class DataContainer():
             msg = msg.format(self.chromatinFolder)
             print(msg)
             return
-        self.factorNames = [os.path.basename(x) for x in bigwigFileList]
+        self.factorNames = [os.path.splitext(name)[0] for name in bigwigFileList]
         self.nr_factors = len(self.factorNames)
         #check the chromosome name prefixes (e.g. "" or "chr") and sizes
         chromSizeList = []
@@ -275,6 +277,8 @@ class DataContainer():
             if not None in matrixData:
                 recordDict["matrixData"] = np.array(matrixData)
             records.writeTFRecord(pFilename=recordfile, pRecordDict=recordDict)
+        self.storedFiles = recordfiles
+        self.storedFeatures = [key for key in recordDict]
         return recordfiles
 
     def getNumberSamples(self, flankingsize, windowsize):
@@ -339,3 +343,60 @@ class DataContainer():
                 "matrixArray": matrixArray, 
                 "sequenceArray": sequenceArray}
         
+    def plotFeatureAtIndex(self, idx, flankingsize, windowsize, maxdist, outpath, figuretype="png"):
+        if self.binsize is None:
+            self.loadData()
+        if self.FactorDataArray is None or self.chromSize_factors is None:
+            msg = "Error: cannot plot features when they are not present"
+            raise ValueError(msg)
+        if not isinstance(flankingsize, int) \
+                or not isinstance(windowsize, int) \
+                or not isinstance(maxdist, int):
+            msg = "Error: Flankingsize, Windowsize and Maxdist must be integers"
+            raise ValueError(msg)
+        if isinstance(idx, int) and (idx >= self.FactorDataArray.shape[0] or idx < 0):
+            msg = "Error: Invalid index {:d}; must be None or in 0..{:d}".format(idx, self.FactorDataArray.shape[0])
+            raise ValueError(msg)
+        if isinstance(idx, int):
+            factorArray = self.__getFactorData(idx, flankingsize, windowsize)
+            startBin = idx
+        else:
+            factorArray = self.FactorDataArray 
+            startBin = None
+        for plotType in ["box", "line"]:   
+            utils.plotChromatinFactors(pFactorArray=factorArray, 
+                                        pFeatureNameList=self.factorNames,
+                                        pChromatinFolder=self.chromatinFolder,
+                                        pChrom=self.chromosome,
+                                        pBinsize=self.binsize,
+                                        pStartbin=startBin,
+                                        pOutputPath=outpath,
+                                        pPlotType=plotType,
+                                        pFigureType=figuretype)
+    
+    def plotFeaturesAtPosition(self, position, flankingsize, windowsize, maxdist, outpath, figuretype="png"):
+        if self.binsize is None:
+            self.loadData()
+        if self.FactorDataArray is None or self.chromSize_factors is None:
+            msg = "Error: cannot plot features when they are not present"
+            raise ValueError(msg)
+        if not isinstance(flankingsize, int) \
+                or not isinstance(windowsize, int) \
+                or not isinstance(maxdist, int):
+            msg = "Error: Flankingsize, Windowsize and Maxdist must be integers"
+            raise ValueError(msg)
+        if isinstance(position, int) and position > self.chromSize_factors:
+            msg = "Error: Invalid position {:d}; must be in 0..{:d}"
+            msg = msg.format(position, self.chromSize_factors)
+            raise ValueError(msg)
+        #compute the bin index from the position
+        elif isinstance(position, int):
+            idx = int(np.floor(position / self.binsize))
+        else:
+            idx = None
+        return self.plotFeatureAtIndex(idx=idx, 
+                                        flankingsize=flankingsize, 
+                                        windowsize=windowsize, 
+                                        maxdist=maxdist,
+                                        outpath=outpath,
+                                        figuretype=figuretype)
