@@ -80,7 +80,7 @@ class DataContainer():
             msg += "Sequence: {:d} -- Factors: {:d}".format(self.chromSize_sequence, chromSize_factors)
             raise ValueError(msg)
         #load the data into memory now
-        self.factorNames = [os.path.splitext(name)[0] for name in bigwigFileList]
+        self.factorNames = [os.path.splitext(os.path.basename(name))[0] for name in bigwigFileList]
         self.nr_factors = len(self.factorNames)
         self.prefixDict_factors = prefixDict_factors
         self.chromSize_factors = chromSize_factors
@@ -380,12 +380,11 @@ class DataContainer():
             msg = "Error: cannot plot features when they are not present"
             raise ValueError(msg)
         if not isinstance(flankingsize, int) \
-                or not isinstance(windowsize, int) \
-                or not isinstance(maxdist, int):
-            msg = "Error: Flankingsize, Windowsize and Maxdist must be integers"
+                or not isinstance(windowsize, int):
+            msg = "Error: Flankingsize and Windowsize must be integers"
             raise ValueError(msg)
         if isinstance(idx, int) and (idx >= self.FactorDataArray.shape[0] or idx < 0):
-            msg = "Error: Invalid index {:d}; must be None or in 0..{:d}".format(idx, self.FactorDataArray.shape[0])
+            msg = "Error: Invalid index {:d}; must be None or integer in 0..{:d}".format(idx, self.FactorDataArray.shape[0]-1)
             raise ValueError(msg)
         if isinstance(idx, int):
             factorArray = self.__getFactorData(idx, flankingsize, windowsize)
