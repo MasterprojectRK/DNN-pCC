@@ -318,7 +318,7 @@ def plotChromatinFactors_lineplots(pChromFactorArray, pFilename, pBinSize, pStar
     winsize = pChromFactorArray.shape[0]
     nr_subplots = pChromFactorArray.shape[1]
     x_axis_values = np.arange(winsize) * pBinSize
-    figsizeX = max(6, int(max(x_axis_values)/2000000))
+    figsizeX = max(30, int(max(x_axis_values)/2000000))
     figsizeX = min(100, figsizeX)
     figsizeY = max(6, 3*nr_subplots)
     figsizeY = min(100, figsizeY)
