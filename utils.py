@@ -1007,3 +1007,15 @@ def getChromPrefixCooler(pCoolerFileName):
         msg = msg.format(pCoolerFileName)
         raise ValueError(msg) 
     return prefix
+
+def getDiamondIndices(pMatsize, pDiamondsize):
+    nr_diamonds = pMatsize - 2*pDiamondsize
+    if nr_diamonds <= 1:
+        msg = "Diamondsize too large for Matsize"
+        raise ValueError(msg)
+    start_offset = pDiamondsize
+    rowEndList = [i + start_offset for i in range(nr_diamonds)]
+    rowStartList = [i-pDiamondsize for i in rowEndList] 
+    columnStartList = [i+1 for i in rowEndList]
+    columnEndList = [i+pDiamondsize for i in columnStartList]
+    return rowStartList, rowEndList, columnStartList, columnEndList
