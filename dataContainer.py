@@ -4,6 +4,7 @@ import os
 import numpy as np
 from Bio import SeqIO
 from tensorflow import dtypes as tfdtypes
+from scipy.sparse import save_npz, csr_matrix
 
 class DataContainer():
     def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
@@ -429,3 +430,21 @@ class DataContainer():
                                         maxdist=maxdist,
                                         outpath=outpath,
                                         figuretype=figuretype)
+
+    def saveMatrix(self, flankingsize, windowsize, maxdist, outputpath, index=None):
+        sparseMatrix = None
+        if isinstance(maxdist, int) and maxdist <= windowsize:
+            maxdistInt = maxdist
+        else:
+            maxdistInt = windowsize
+        if isinstance(index, int) and index < self.getNumberSamples(flankingsize, windowsize):
+            tmpMat = np.zeros(shape=(windowsize, windowsize))
+            indices = np.mask_indices(windowsize, utils.maskFunc, k=maxdistInt)
+            tmpMat[indices] = self.__getMatrixData(idx=index, flankingsize=flankingsize, windowsize=windowsize, maxdist=maxdist)
+            sparseMatrix = csr_matrix(tmpMat)
+        else:
+            sparseMatrix = self.sparseHiCMatrix
+        folderName = self.chromatinFolder.rstrip("/").replace("/","-")
+        filename = "matrix_{:s}_chr{:s}_{:s}".format(folderName, str(self.chromosome), str(index))
+        filename = os.path.join(outputpath, filename)
+        save_npz(file=filename, matrix=sparseMatrix)
