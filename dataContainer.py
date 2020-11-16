@@ -459,3 +459,91 @@ class DataContainer():
             recordDict["out_matrixData"] = np.array(matrixData)
             storedFeaturesDict["out_matrixData"] = {"shape": recordDict["out_matrixData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["out_matrixData"].dtype)}
         return recordDict, storedFeaturesDict
+
+
+class DataContainerWithScores(DataContainer):
+    def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
+        if matrixfilepath is None:
+            msg = "This container only works when a cooler matrix is given"
+            raise ValueError(msg)
+        super(DataContainerWithScores, self).__init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None)
+
+    def writeTFRecord(self, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None, pRecordSize=None, pDiamondsize=None):
+        '''
+        Write a dataset to disk in tensorflow TFRecord format
+        
+        Parameters:
+            pWindowsize (int): size of submatrices
+            pOutfolder (str): directory where TFRecords will be written
+            pFlankingsize (int): size of flanking regions left/right of submatrices
+            pMaxdist (int): cut the matrices off at this distance (in bins)
+            pRecordsize (int): split the TFRecords into multiple files containing approximately this number of samples
+        
+        Returns:
+            list of filenames written
+        '''
+
+        windowsize = pWindowsize
+        flankingsize = windowsize
+        if pFlankingsize is not None and pFlankingsize > 0:
+            flankingsize = pFlankingsize
+        maxdist = pMaxdist
+        if pMaxdist is not None:
+            maxdist = min(pMaxdist, windowsize-1)
+        #get the number of samples
+        if self.binsize is None:
+            self.loadData()
+        nr_samples = self.getNumberSamples(flankingsize=flankingsize, windowsize=windowsize)
+        #adjust record size (yields smaller files and reduces memory load)
+        recordsize = nr_samples
+        if pRecordSize is not None and pRecordSize < recordsize:
+            recordsize = pRecordSize
+        #compute number of record files, number of samples 
+        #in each file and corresponding indices
+        nr_files = int( np.ceil(nr_samples/recordsize) )
+        target_ct = int( np.floor(nr_samples/nr_files) )
+        samples_per_file = [target_ct]*(nr_files-1) + [nr_samples-(nr_files-1)*target_ct]
+        sample_indices = [sum(samples_per_file[0:i]) for i in range(len(samples_per_file)+1)] 
+        #write the single files
+        folderName = self.chromatinFolder.rstrip("/").replace("/","-")
+        recordfiles = [os.path.join(pOutfolder, "{:s}_{:s}_{:03d}.tfrecord".format(folderName, str(self.chromosome), i + 1)) for i in range(nr_files)]
+        for recordfile, firstIndex, lastIndex in zip(recordfiles, sample_indices, sample_indices[1:]):
+            recordDict, storedFeaturesDict = self.__prepareWriteoutDict(pFirstIndex=firstIndex, 
+                                                                        pLastIndex=lastIndex, 
+                                                                        pWindowsize=windowsize, 
+                                                                        pOutfolder=pOutfolder,
+                                                                        pFlankingsize=flankingsize, 
+                                                                        pMaxdist=maxdist,
+                                                                        diamondsize=pDiamondsize)
+            records.writeTFRecord(pFilename=recordfile, pRecordDict=recordDict)
+        self.storedFiles = recordfiles
+        self.storedFeatures = storedFeaturesDict
+        return recordfiles
+
+    def __prepareWriteoutDict(self, pFirstIndex, pLastIndex, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None, pDiamondsize=None):
+        recordDict, storedFeaturesDict = super().__prepareWriteoutDict(pFirstIndex=pFirstIndex,
+                                                                pLastIndex=pLastIndex,
+                                                                pWindowsize=pWindowsize,
+                                                                pOutfolder=pOutfolder,
+                                                                pFlankingsize=pFlankingsize,
+                                                                pMaxdist=pMaxdist)
+        diamondsizeInt = pDiamondsize
+        if not isinstance(pDiamondsize, int) or pDiamondsize > 0.75 * pWindowsize:
+            diamondsizeInt = int(0.25 * pWindowsize)
+        scoreData = [] 
+        for i in range(pFirstIndex, pLastIndex):
+            tmpMat = np.zeros(shape=(pWindowsize, pWindowsize))
+            indices = np.mask_indices(pWindowsize, utils.maskFunc, k=pMaxdist)
+            tmpMat[indices] = self.__getMatrixData(idx=i, flankingsize=pFlankingsize, windowsize=pWindowsize, maxdist=pMaxdist)
+            rowStartList, rowEndList, columnStartList, columnEndList = utils.getDiamondIndices(pMatsize=pWindowsize, pDiamondsize=diamondsizeInt)
+            l = [ tmpMat[i:j,k:l] for i,j,k,l in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
+            l = [ np.mean(i) for i in l]
+            scoreData.append(l)
+        recordDict["out_scoreData"] = np.array(scoreData)
+        storedFeaturesDict["out_scoreData"] = {"shape": recordDict["out_scoreData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["out_scoreData"].dtype)}
+        return recordDict, storedFeaturesDict
+    
+    #todo: store the scores for the full matrix
+    #this allows getting scores for specific samples easily
+    #implement score printing function
+        
