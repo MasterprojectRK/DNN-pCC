@@ -30,7 +30,7 @@ class DataContainer():
         self.storedFeatures = None
         self.storedFiles = None
 
-    def __loadFactorData(self, ignoreChromLengths=False, scaleFeatures=False):
+    def __loadFactorData(self, ignoreChromLengths=False, scaleFeatures=False, clampFeatures=False):
         #load chromatin factor data from bigwig files
         if self.chromatinFolder is None:
             return
@@ -95,6 +95,8 @@ class DataContainer():
                                                 pBinSizeInt=self.binsize,
                                                 pChromStr=chromname,
                                                 pChromSize=self.chromSize_factors)
+            if clampFeatures:
+                tmpArray = utils.clampArray(tmpArray)
             if scaleFeatures:
                 tmpArray = utils.scaleArray(tmpArray)
             self.FactorDataArray[i] = tmpArray
@@ -208,9 +210,9 @@ class DataContainer():
         self.__unloadMatrixData
         self.__unloadSequenceData
     
-    def loadData(self, scaleFeatures=False, scaleTargets=False):
+    def loadData(self, scaleFeatures=False, clampFeatures=False, scaleTargets=False):
         self.__loadMatrixData(scaleMatrix=scaleTargets)
-        self.__loadFactorData(scaleFeatures=scaleFeatures)
+        self.__loadFactorData(scaleFeatures=scaleFeatures, clampFeatures=clampFeatures)
         self.__loadSequenceData()
 
     def checkCompatibility(self, containerIterable):
