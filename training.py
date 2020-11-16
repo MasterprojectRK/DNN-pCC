@@ -221,6 +221,11 @@ def training(trainmatrices,
                                          maxdist=maxdist,
                                          outpath=outputpath,
                                          figuretype=figuretype)
+            container.saveMatrix(flankingsize=flankingsize, 
+                                 windowsize=windowsize,
+                                 maxdist=maxdist, 
+                                 outputpath=outputpath,
+                                 index=idx)
         nr_samples_list.append(container.getNumberSamples(flankingsize=flankingsize, windowsize=windowsize))
         container.unloadData()
     traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
