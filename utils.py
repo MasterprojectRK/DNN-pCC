@@ -126,8 +126,20 @@ def showMatrix(pMatrix):
     plt.show()
 
 def plotMatrix(pMatrix, pFilename, pTitle):
-    #test function to plot matrices
-    #debug only, not for production use
+    '''
+    helper function to plot dense numpy 2D matrices in logscale to a file
+    
+    Parameters:
+    pMatrix (numpy.ndarray): The matrix to plot, must be 2D
+    pFilename (str): The filename for the plot, should have file extension .png, .pdf or .svg
+    pTitle (str): A title that will appear on the plot
+
+    Returns:
+    None
+    '''
+    if not isinstance(pMatrix, np.ndarray) \
+            or len(pMatrix.shape) != 2:
+        return
     fig1, ax1 = plt.subplots()
     cs = ax1.matshow(pMatrix, cmap="RdYlBu_r", norm=colors.LogNorm())
     ax1.set_title(str(pTitle))
