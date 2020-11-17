@@ -356,9 +356,9 @@ class DataContainer():
         factorArray = self.__getFactorData(idx, flankingsize, windowsize)
         matrixArray = self.__getMatrixData(idx, flankingsize, windowsize, maxdist)
         sequenceArray = self.__getSequenceData(idx, flankingsize, windowsize)
-        return {"factorArray": factorArray, 
-                "matrixArray": matrixArray, 
-                "sequenceArray": sequenceArray}
+        return {"factorData": factorArray, 
+                "out_matrixData": matrixArray, 
+                "sequenceData": sequenceArray}
         
     def plotFeatureAtIndex(self, idx, flankingsize, windowsize, maxdist, outpath, figuretype="png"):
         if self.binsize is None:
@@ -436,28 +436,17 @@ class DataContainer():
         save_npz(file=filename, matrix=sparseMatrix)
 
     def __prepareWriteoutDict(self, pFirstIndex, pLastIndex, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None):
-        factorData = []
-        matrixData = []
-        sequenceData = []
-        for i in range(pFirstIndex,pLastIndex):
-            data = self.getSampleData(idx=i, 
-                                        flankingsize=pFlankingsize, 
-                                        windowsize=pWindowsize, 
-                                        maxdist=pMaxdist)
-            factorData.append(data["factorArray"])
-            matrixData.append(data["matrixArray"])
-            sequenceData.append(data["sequenceArray"])
+        data = [ self.getSampleData(idx=i, flankingsize=pFlankingsize, windowsize=pWindowsize, maxdist=pMaxdist) for i in range(pFirstIndex, pLastIndex) ]
         recordDict = dict()
         storedFeaturesDict = dict()
-        if not any(elem is None for elem in factorData):
-            recordDict["factorData"] = np.array(factorData)
-            storedFeaturesDict["factorData"] = {"shape": recordDict["factorData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["factorData"].dtype)}
-        if not any(elem is None for elem in sequenceData):
-            recordDict["sequenceData"] = np.array(sequenceData)
-            storedFeaturesDict["sequenceData"] = {"shape": recordDict["sequenceData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["sequenceData"].dtype)}
-        if not any(elem is None for elem in matrixData):
-            recordDict["out_matrixData"] = np.array(matrixData)
-            storedFeaturesDict["out_matrixData"] = {"shape": recordDict["out_matrixData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["out_matrixData"].dtype)}
+        if len(data) < 1:
+            msg = "Error: No data to write"
+            raise ValueError(msg)
+        for key in data[0]:
+            featData = [feature[key] for feature in data]
+            if not any(elem is None for elem in featData):
+                recordDict[key] = np.array(featData)
+                storedFeaturesDict[key] = {"shape": recordDict[key].shape[1:], "dtype": tfdtypes.as_dtype(recordDict[key].dtype)}
         return recordDict, storedFeaturesDict
 
 
