@@ -289,9 +289,10 @@ def training(trainmatrices,
         dictWriter.writeheader()
         dictWriter.writerow(paramDict)
 
-    #plot the model
+    #plot the model using workaround from tensorflow issue #38988
     modelPlotName = "model.{:s}".format(figuretype)
     modelPlotName = os.path.join(outputpath, modelPlotName)
+    model._layers = [layer for layer in model._layers if isinstance(layer, tf.keras.layers.Layer)] #workaround for plotting with custom loss functions
     tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
     #build input streams
