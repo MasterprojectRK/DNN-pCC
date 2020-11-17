@@ -357,8 +357,12 @@ def getOptimizer(pOptimizerString, pLearningrate):
         raise NotImplementedError("unknown optimizer")
     return kerasOptimizer
 
-def getLosses(pLossStr):
+def getLosses(pLossStr, includeScore=False, windowsize=None, diamondsize=None, scoreWeight=None):
+    if includeScore and (windowsize is None or diamondsize is None or scoreWeight is None):
+        msg = "must set windowsize, diamondsize and scoreWeight when includeScore is True"
+        raise ValueError(msg)
     loss_fn = None
+    loss_weights = None
     if pLossStr == "MSE":
         loss_fn = tf.keras.losses.MeanSquaredError()
     elif pLossStr == "Huber":
@@ -373,7 +377,12 @@ def getLosses(pLossStr):
         loss_fn = tf.keras.losses.CosineSimilarity()
     else:
         raise NotImplementedError("unknown loss function")
-    return loss_fn
+    #include second loss function, if model includes insulation score
+    if includeScore:
+        loss_fn = {"out_matrixData": loss_fn,
+                   "out_scoreData": models.customLossWrapper(windowsize, diamondsize)}
+        loss_weights = {"out_matrixData": 1.0, "out_scoreData": scoreWeight}
+    return  loss_fn, loss_weights
 
 
 if __name__ == "__main__":
