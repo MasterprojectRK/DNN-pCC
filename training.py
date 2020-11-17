@@ -253,12 +253,16 @@ def training(trainmatrices,
     #define optimizer
     kerasOptimizer = getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
     
-    # define loss(es)
-    loss_fn = getLosses(pLossStr = loss)
+    #define loss(es)
+    loss_fn, loss_weights = getLosses(pLossStr = loss, 
+                                        includeScore=includescore, 
+                                        windowsize=windowsize, 
+                                        diamondsize=scoresize, 
+                                        scoreWeight=scoreweight)
 
     #compile the model
     model.compile(optimizer=kerasOptimizer, 
-                 loss=loss_fn)
+                 loss=loss_fn, loss_weights=loss_weights)
     model.summary()
 
     #callbacks to check the progress etc.
