@@ -252,6 +252,8 @@ def training(trainmatrices,
                 container.plotInsulationScore(outpath=outputpath, 
                                               figuretype=figuretype, 
                                               index=idx)
+                container.saveInsulationScoreToBed(outpath=outputpath,
+                                                    index=idx)
         nr_samples_list.append(container.getNumberSamples())
         container.unloadData()
     traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
