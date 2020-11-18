@@ -41,7 +41,7 @@ def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
         coolerMatrix = cooler.Cooler(pCoolerFilePath)
         sparseMatrix = coolerMatrix.matrix(sparse=True,balance=False).fetch(pChromNameStr)
         sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
-        binSizeInt = coolerMatrix.binsize
+        binSizeInt = int(coolerMatrix.binsize)
     except Exception as e:
         print(e)
     return sparseMatrix, binSizeInt
