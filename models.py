@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D
+from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D,Activation
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras import Input
 import numpy as np
@@ -7,7 +7,7 @@ import threading
 import utils
 
 
-def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None):
+def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None, pIncludeScore=False):
     flankingsize = None
     maxdist = None
     if pFlankingSize is None:
@@ -58,7 +58,8 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
                                     pNrFiltersList=nrFiltersList,
                                     pKernelWidthList=kernelSizeList,
                                     pNrNeuronsList=nrNeuronsList,
-                                    pDropoutRate=dropoutRate)
+                                    pDropoutRate=dropoutRate,
+                                    pIncludeScore=pIncludeScore)
     elif sequentialModel == False and pModelTypeStr == "sequence":
         return buildSequenceModel(pWindowSize=pWindowSize,
                                   pFlankingSize=flankingsize,
@@ -71,7 +72,7 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate):
+def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate, pIncludeScore):
     msg = ""
     if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
         msg += "No. of filters must be a list\n"
@@ -90,8 +91,8 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
         msg = "dropout must be in (0..1)"
         print(msg)
         return None
-    model = Sequential()
-    model.add(Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="factorData"))
+    inputs = Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="factorData")
+    x = inputs
     #add the requested number of 1D convolutions
     for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
         convParamDict = dict()
@@ -102,15 +103,15 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
         convParamDict["data_format"]="channels_last"
         if kernelWidth > 1:
             convParamDict["padding"] = "same"
-        model.add(Conv1D(**convParamDict))
+        x = Conv1D(**convParamDict)(x)
     #flatten the output from the convolutions
-    model.add(Flatten(name="flatten_1"))
+    x = Flatten(name="flatten_1")(x)
     #add the requested number of dense layers and dropout
     for i, nr_neurons in enumerate(pNrNeuronsList):
         layerName = "dense_" + str(i+1)
-        model.add(Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName))
+        x = Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName)(x)
         layerName = "dropout_" + str(i+1)
-        model.add(Dropout(pDropoutRate, name=layerName))
+        x = Dropout(pDropoutRate, name=layerName)(x)
     #add the output layer (corresponding to a predicted submatrix, 
     #here only the upper triangular part, along the diagonal of a Hi-C matrix)
     #this matrix may additionally be capped to maxDist, so that a trapezoid remains
@@ -118,7 +119,11 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
     nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
     nr_elements_capped = int( 1/2 * diff * (diff+1) )   
     nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
-    model.add(Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData"))
+    x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
+    model = Model(inputs=inputs, outputs=x)
+    if pIncludeScore == True:
+        y = Activation(activation="linear", name="out_scoreData")(x)
+        model = Model(inputs=inputs, outputs=[x, y])
     return model
 
 def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols, pDropoutRate):

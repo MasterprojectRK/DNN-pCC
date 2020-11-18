@@ -87,6 +87,15 @@ tf.random.set_seed(35)
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
                 default="initial", show_default=True,
                 help="Type of model to use")
+@click.option("--includeScore", "-ics", required=False,
+                type=bool, default=False, show_default=True,
+                help="include insulation score for optimization")
+@click.option("--scoreWeight", "-scw", required=False,
+                type=click.FloatRange(min=0.01), default=1.0, show_default=True,
+                help="weight for score loss (matrix loss is 1.0). Only relevant if includeScore is True")
+@click.option("--scoreSize", "-ssz", required=False,
+                type=click.IntRange(min=1.0), 
+                help="size for computation of insulation score. Must be (much) smaller than windowsize")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
                 default="SGD", show_default=True,
@@ -131,6 +140,9 @@ def training(trainmatrices,
             clampfactors,
             scalefactors,
             modeltype,
+            includescore,
+            scoreweight,
+            scoresize,
             optimizer,
             loss,
             earlystopping,
@@ -149,7 +161,11 @@ def training(trainmatrices,
 
     if flankingsize is None:
         flankingsize = windowsize
-        paramDict["flankingsize"] = windowsize
+        paramDict["flankingsize"] = flankingsize
+    
+    if scoresize is None and includescore:
+        scoresize = int(windowsize * 0.25)
+        paramDict["scoresize"] = scoresize
 
     trainChromNameList = trainchromosomes.rstrip().split(" ")  
     trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
@@ -175,40 +191,52 @@ def training(trainmatrices,
     modelTypeStr = checkSetModelTypeStr(modeltype, sequencefile)
     paramDict["modeltype"] = modelTypeStr
 
+    #select the correct class for the data container
+    containerCls = dataContainer.DataContainer
+    if includescore:
+        containerCls = dataContainer.DataContainerWithScores
     #prepare the training data containers. No data is loaded yet.
     traindataContainerList = []
     for chrom in trainChromNameList:
         for matrix, chromatinpath in zip(trainmatrices, trainchromatinpaths):
-            container = dataContainer.DataContainer(chromosome=chrom,
-                                                    matrixfilepath=matrix,
-                                                    chromatinFolder=chromatinpath,
-                                                    sequencefilepath=sequencefile)
+            container = containerCls(chromosome=chrom,
+                                    matrixfilepath=matrix,
+                                    chromatinFolder=chromatinpath,
+                                    sequencefilepath=sequencefile)
             traindataContainerList.append(container)
 
     #prepare the validation data containers. No data is loaded yet.
     validationdataContainerList = []
     for chrom in validationChromNameList:
         for matrix, chromatinpath in zip(validationmatrices, validationchromatinpaths):
-            container = dataContainer.DataContainer(chromosome=chrom,
-                                                    matrixfilepath=matrix,
-                                                    chromatinFolder=chromatinpath,
-                                                    sequencefilepath=sequencefile)
+            container = containerCls(chromosome=chrom,
+                                    matrixfilepath=matrix,
+                                    chromatinFolder=chromatinpath,
+                                    sequencefilepath=sequencefile)
             validationdataContainerList.append(container)
 
+    #define the load params for the containers
+    loadParams = {"scaleFeatures": scalefactors,
+                  "clampFeatures": clampfactors,
+                  "scaleTargets": scalematrix,
+                  "windowsize": windowsize,
+                  "flankingsize": flankingsize,
+                  "maxdist": maxdist}
+    if includescore:
+        loadParams["diamondsize"] = scoresize
     #now load the data and write TFRecords, one container at a time.
     if len(traindataContainerList) == 0:
+        msg = "Exiting. No data found"
+        print(msg)
         return #nothing to do
     container0 = traindataContainerList[0]
     tfRecordFilenames = []
     nr_samples_list = []
     for container in traindataContainerList + validationdataContainerList:
-        container.loadData(scaleFeatures=scalefactors, clampFeatures=clampfactors, scaleTargets=scalematrix)
+        container.loadData(**loadParams)
         if not container0.checkCompatibility(container):
             msg = "Aborting. Incompatible data"
-        tfRecordFilenames.append(container.writeTFRecord(pWindowsize=windowsize,
-                                                        pOutfolder=outputpath,
-                                                        pFlankingsize=flankingsize,
-                                                        pMaxdist=maxdist,
+        tfRecordFilenames.append(container.writeTFRecord(pOutfolder=outputpath,
                                                         pRecordSize=recordsize))
         if debugstate is not None:
             if isinstance(debugstate, int):
@@ -226,7 +254,13 @@ def training(trainmatrices,
                                  maxdist=maxdist, 
                                  outputpath=outputpath,
                                  index=idx)
-        nr_samples_list.append(container.getNumberSamples(flankingsize=flankingsize, windowsize=windowsize))
+            if isinstance(container, dataContainer.DataContainerWithScores):
+                container.plotInsulationScore(flankingsize=flankingsize, 
+                                                windowsize=windowsize, 
+                                                outpath=outputpath, 
+                                                figuretype=figuretype, 
+                                                index=idx)
+        nr_samples_list.append(container.getNumberSamples())
         container.unloadData()
     traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
     validationdataRecords = [item for sublist in tfRecordFilenames[len(traindataContainerList):] for item in sublist]    
@@ -249,7 +283,8 @@ def training(trainmatrices,
                                     pNrFactors=nr_factors,
                                     pNrSymbols=nr_symbols,
                                     pFlankingSize=flankingsize,
-                                    pMaxDist=maxdist)
+                                    pMaxDist=maxdist,
+                                    pIncludeScore=includescore)
     #define optimizer
     kerasOptimizer = getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
     
