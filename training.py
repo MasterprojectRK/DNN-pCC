@@ -252,7 +252,7 @@ def training(trainmatrices,
                 container.plotInsulationScore(outpath=outputpath, 
                                               figuretype=figuretype, 
                                               index=idx)
-                container.saveInsulationScoreToBed(outpath=outputpath,
+                container.saveInsulationScoreToBedgraph(outpath=outputpath,
                                                     index=idx)
         nr_samples_list.append(container.getNumberSamples())
         container.unloadData()
