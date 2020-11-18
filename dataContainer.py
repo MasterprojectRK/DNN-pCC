@@ -5,6 +5,7 @@ import numpy as np
 from Bio import SeqIO
 from tensorflow import dtypes as tfdtypes
 from scipy.sparse import save_npz, csr_matrix
+from tqdm import tqdm
 
 class DataContainer():
     def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
@@ -29,6 +30,10 @@ class DataContainer():
         self.sequenceSymbols = None
         self.storedFeatures = None
         self.storedFiles = None
+        self.windowsize = None
+        self.flankingsize = None
+        self.maxdist = None
+        self.data_loaded = False
 
     def __loadFactorData(self, ignoreChromLengths=False, scaleFeatures=False, clampFeatures=False):
         #load chromatin factor data from bigwig files
@@ -211,11 +216,24 @@ class DataContainer():
         self.__unloadFactorData
         self.__unloadMatrixData
         self.__unloadSequenceData
+        self.windowsize = None
+        self.flankingsize = None
+        self.maxdist = None
+        self.data_loaded = False
     
-    def loadData(self, scaleFeatures=False, clampFeatures=False, scaleTargets=False):
+    def loadData(self, windowsize, flankingsize=None, maxdist=None, scaleFeatures=False, clampFeatures=False, scaleTargets=False):
+        if not isinstance(windowsize, int):
+            msg = "windowsize must be integer"
+            raise TypeError(msg)
+        if isinstance(maxdist, int):
+            maxdist = np.clip(maxdist, a_min=1, a_max=self.windowsize)
         self.__loadMatrixData(scaleMatrix=scaleTargets)
         self.__loadFactorData(scaleFeatures=scaleFeatures, clampFeatures=clampFeatures)
         self.__loadSequenceData()
+        self.windowsize = windowsize
+        self.flankingsize = flankingsize
+        self.maxdist = maxdist
+        self.data_loaded = True
 
     def checkCompatibility(self, containerIterable):
         ret = []
@@ -229,27 +247,33 @@ class DataContainer():
     def __checkCompatibility(self, container):
         if not isinstance(container, DataContainer):
             return False
+        if not self.data_loaded or not container.data_loaded:
+            return False
         #check if the same kind of data is available for all containers
         factorsOK = type(self.FactorDataArray) == type(container.FactorDataArray)
         matrixOK = type(self.sparseHiCMatrix) == type(container.sparseHiCMatrix)
         sequenceOK = type(self.sequenceArray) == type(container.sequenceArray)
-        #if chromatin factors are present, they need be loaded to check compatibility
+        #check if windowsize, flankingsize and maxdist match
+        windowsizeOK = self.windowsize == container.windowsize
+        flankingsizeOK = self.flankingsize == container.flankingsize
+        maxdistOK = self.maxdist == container.maxdist
+        #sanity check loading of bigwig files
         if self.chromatinFolder is not None and self.nr_factors is None:
             return False
         if container.chromatinFolder is not None and container.nr_factors is None:
             return False
         #if chromatin factors are present, the number of chromatin factors must match
         factorsOK = factorsOK and (self.nr_factors == container.nr_factors)
-        #if DNA sequences are present, they need be loaded to decide compatibility
+        #sanity check loading of DNA sequences
         if self.sequencefilepath is not None and self.sequenceSymbols is None:
             return False
         if container.sequencefilepath is not None and container.sequenceSymbols is None:
             return False
         #if DNA sequences are present, the number of symbols must match
         sequenceOK = sequenceOK and (self.sequenceSymbols == container.sequenceSymbols)
-        return factorsOK and matrixOK and sequenceOK
+        return factorsOK and matrixOK and sequenceOK and windowsizeOK and flankingsizeOK and maxdistOK
         
-    def writeTFRecord(self, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None, pRecordSize=None):
+    def writeTFRecord(self, pOutfolder, pRecordSize=None):
         '''
         Write a dataset to disk in tensorflow TFRecord format
         
@@ -264,17 +288,11 @@ class DataContainer():
             list of filenames written
         '''
 
-        windowsize = pWindowsize
-        flankingsize = windowsize
-        if pFlankingsize is not None and pFlankingsize > 0:
-            flankingsize = pFlankingsize
-        maxdist = pMaxdist
-        if pMaxdist is not None:
-            maxdist = min(pMaxdist, windowsize-1)
-        #get the number of samples
-        if self.binsize is None:
-            self.loadData()
-        nr_samples = self.getNumberSamples(flankingsize=flankingsize, windowsize=windowsize)
+        if not self.data_loaded:
+            msg = "Warning: No data loaded, nothing to write"
+            print(msg)
+            return None
+        nr_samples = self.getNumberSamples()
         #adjust record size (yields smaller files and reduces memory load)
         recordsize = nr_samples
         if pRecordSize is not None and pRecordSize < recordsize:
@@ -288,23 +306,20 @@ class DataContainer():
         #write the single files
         folderName = self.chromatinFolder.rstrip("/").replace("/","-")
         recordfiles = [os.path.join(pOutfolder, "{:s}_{:s}_{:03d}.tfrecord".format(folderName, str(self.chromosome), i + 1)) for i in range(nr_files)]
-        for recordfile, firstIndex, lastIndex in zip(recordfiles, sample_indices, sample_indices[1:]):
+        for recordfile, firstIndex, lastIndex in tqdm(zip(recordfiles, sample_indices, sample_indices[1:]), desc="Storing TFRecord files", total=len(recordfiles)):
             recordDict, storedFeaturesDict = self.__prepareWriteoutDict(pFirstIndex=firstIndex, 
                                                                         pLastIndex=lastIndex, 
-                                                                        pWindowsize=windowsize, 
-                                                                        pOutfolder=pOutfolder,
-                                                                        pFlankingsize=flankingsize, 
-                                                                        pMaxdist=maxdist)
+                                                                        pOutfolder=pOutfolder)
             records.writeTFRecord(pFilename=recordfile, pRecordDict=recordDict)
         self.storedFiles = recordfiles
         self.storedFeatures = storedFeaturesDict
         return recordfiles
 
-    def getNumberSamples(self, flankingsize, windowsize):
-        if self.binsize is None:
-            self.loadData()
+    def getNumberSamples(self):
+        if not self.data_loaded:
+            return None
         featureArrays = [self.FactorDataArray, self.sparseHiCMatrix, self.sequenceArray]
-        cutouts = [windowsize+2*flankingsize, windowsize+2*flankingsize, (windowsize+2*flankingsize)*self.binsize]
+        cutouts = [self.windowsize+2*self.flankingsize, self.windowsize+2*self.flankingsize, (self.windowsize+2*self.flankingsize)*self.binsize]
         nr_samples_list = []
         for featureArray, cutout in zip(featureArrays, cutouts):
             if featureArray is not None:
@@ -317,66 +332,78 @@ class DataContainer():
             raise RuntimeError(msg)
         return max(nr_samples_list)
 
-    def __getMatrixData(self, idx, flankingsize, windowsize, maxdist):
+    def __getMatrixData(self, idx):
         if self.matrixfilepath is None:
             return None # this can't work
-        if self.matrixfilepath is not None and self.sparseHiCMatrix is None:
-            self.loadData()
+        if not self.data_loaded:
+            msg = "Error: Load data first"
+            raise RuntimeError(msg)
         #the 0-th matrix starts flankingsize away from the boundary
+        windowsize = self.windowsize
+        flankingsize = self.flankingsize
+        if flankingsize is None:
+            flankingsize = windowsize
         startInd = idx + flankingsize
         stopInd = startInd + windowsize
         trainmatrix = None
-        if isinstance(maxdist, int) and maxdist < windowsize: #trapezoids, i.e. distance limited submatrices
-            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, maxdist)]
+        if isinstance(self.maxdist, int) and self.maxdist < windowsize and self.maxdist > 0: #trapezoids, i.e. distance limited submatrices
+            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, self.maxdist)]
         else: #triangles, i. e. full submatrices
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(windowsize)]
         trainmatrix = np.nan_to_num(trainmatrix)
         return trainmatrix
     
-    def __getSequenceData(self, idx, flankingsize, windowsize):
+    def __getSequenceData(self, idx):
         if self.sequencefilepath is None:
             return None
-        if self.sequencefilepath is not None and self.sequenceArray is None:
-            self.loadData()
+        if not self.data_loaded:
+            msg = "Error: Load data first"
+            raise RuntimeError(msg)
+        windowsize = self.windowsize
+        flankingsize = self.flankingsize
+        if flankingsize is None:
+            flankingsize = windowsize
         startInd = idx + flankingsize * self.binsize
         stopInd = startInd + windowsize * self.binsize
         seqArray = self.sequenceArray[startInd:stopInd,:]
         return seqArray
 
-    def __getFactorData(self, idx, flankingsize, windowsize):
+    def __getFactorData(self, idx):
         if self.chromatinFolder is None:
             return None
-        if self.chromatinFolder is not None and self.FactorDataArray is None:
-            self.loadData()
+        if not self.data_loaded:
+            msg = "Error: Load data first"
+            raise RuntimeError(msg)
         #the 0-th feature matrix starts at position 0
+        windowsize = self.windowsize
+        flankingsize = self.flankingsize
+        if flankingsize is None:
+            flankingsize = windowsize
         startInd = idx
         stopInd = startInd + 2*flankingsize + windowsize
         factorArray = self.FactorDataArray[startInd:stopInd,:]
         return factorArray
 
-    def getSampleData(self, idx, flankingsize, windowsize, maxdist):
-        factorArray = self.__getFactorData(idx, flankingsize, windowsize)
-        matrixArray = self.__getMatrixData(idx, flankingsize, windowsize, maxdist)
-        sequenceArray = self.__getSequenceData(idx, flankingsize, windowsize)
+    def getSampleData(self, idx):
+        if not self.data_loaded:
+            return None
+        factorArray = self.__getFactorData(idx)
+        matrixArray = self.__getMatrixData(idx)
+        sequenceArray = self.__getSequenceData(idx)
         return {"factorData": factorArray, 
                 "out_matrixData": matrixArray, 
                 "sequenceData": sequenceArray}
         
-    def plotFeatureAtIndex(self, idx, flankingsize, windowsize, maxdist, outpath, figuretype="png"):
-        if self.binsize is None:
-            self.loadData()
-        if self.FactorDataArray is None or self.chromSize_factors is None:
-            msg = "Error: cannot plot features when they are not present"
-            raise ValueError(msg)
-        if not isinstance(flankingsize, int) \
-                or not isinstance(windowsize, int):
-            msg = "Error: Flankingsize and Windowsize must be integers"
-            raise ValueError(msg)
+    def plotFeatureAtIndex(self, idx, outpath, figuretype="png"):
+        if not self.data_loaded:
+            msg = "Warning: No data loaded, nothing to plot"
+            print(msg)
+            return
         if isinstance(idx, int) and (idx >= self.FactorDataArray.shape[0] or idx < 0):
             msg = "Error: Invalid index {:d}; must be None or integer in 0..{:d}".format(idx, self.FactorDataArray.shape[0]-1)
             raise ValueError(msg)
         if isinstance(idx, int):
-            factorArray = self.__getFactorData(idx, flankingsize, windowsize)
+            factorArray = self.__getFactorData(idx)
             startBin = idx
         else:
             factorArray = self.FactorDataArray 
@@ -392,17 +419,11 @@ class DataContainer():
                                         pPlotType=plotType,
                                         pFigureType=figuretype)
     
-    def plotFeaturesAtPosition(self, position, flankingsize, windowsize, maxdist, outpath, figuretype="png"):
-        if self.binsize is None:
-            self.loadData()
-        if self.FactorDataArray is None or self.chromSize_factors is None:
-            msg = "Error: cannot plot features when they are not present"
-            raise ValueError(msg)
-        if not isinstance(flankingsize, int) \
-                or not isinstance(windowsize, int) \
-                or not isinstance(maxdist, int):
-            msg = "Error: Flankingsize, Windowsize and Maxdist must be integers"
-            raise ValueError(msg)
+    def plotFeaturesAtPosition(self, position, outpath, figuretype="png"):
+        if not self.data_loaded:
+            msg = "Warning: No data loaded, nothing to plot"
+            print(msg)
+            return
         if isinstance(position, int) and position > self.chromSize_factors:
             msg = "Error: Invalid position {:d}; must be in 0..{:d}"
             msg = msg.format(position, self.chromSize_factors)
@@ -412,23 +433,28 @@ class DataContainer():
             idx = int(np.floor(position / self.binsize))
         else:
             idx = None
-        return self.plotFeatureAtIndex(idx=idx, 
-                                        flankingsize=flankingsize, 
-                                        windowsize=windowsize, 
-                                        maxdist=maxdist,
+        return self.plotFeatureAtIndex(idx=idx,
                                         outpath=outpath,
                                         figuretype=figuretype)
 
-    def saveMatrix(self, flankingsize, windowsize, maxdist, outputpath, index=None):
+    def saveMatrix(self, outputpath, index=None):
+        if not self.data_loaded:
+            msg = "Warning: No data loaded, nothing to save"
+            print(msg)
+            return
         sparseMatrix = None
-        if isinstance(maxdist, int) and maxdist <= windowsize:
-            maxdistInt = maxdist
+        windowsize = self.windowsize
+        flankingsize = self.flankingsize
+        if not isinstance(flankingsize, int):
+            flankingsize = windowsize
+        if isinstance(self.maxdist, int) and self.maxdist < windowsize and self.maxdist > 0:
+            maxdist = self.maxdist
         else:
-            maxdistInt = windowsize
-        if isinstance(index, int) and index < self.getNumberSamples(flankingsize, windowsize):
+            maxdist = windowsize
+        if isinstance(index, int) and index < self.getNumberSamples():
             tmpMat = np.zeros(shape=(windowsize, windowsize))
-            indices = np.mask_indices(windowsize, utils.maskFunc, k=maxdistInt)
-            tmpMat[indices] = self.__getMatrixData(idx=index, flankingsize=flankingsize, windowsize=windowsize, maxdist=maxdist)
+            indices = np.mask_indices(windowsize, utils.maskFunc, k=maxdist)
+            tmpMat[indices] = self.__getMatrixData(idx=index)
             sparseMatrix = csr_matrix(tmpMat)
         else:
             sparseMatrix = self.sparseHiCMatrix
@@ -437,8 +463,11 @@ class DataContainer():
         filename = os.path.join(outputpath, filename)
         save_npz(file=filename, matrix=sparseMatrix)
 
-    def __prepareWriteoutDict(self, pFirstIndex, pLastIndex, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None):
-        data = [ self.getSampleData(idx=i, flankingsize=pFlankingsize, windowsize=pWindowsize, maxdist=pMaxdist) for i in range(pFirstIndex, pLastIndex) ]
+    def __prepareWriteoutDict(self, pFirstIndex, pLastIndex, pOutfolder):
+        if not self.data_loaded:
+            msg = "Error: no data loaded, nothing to prepare"
+            raise RuntimeError(msg)
+        data = [ self.getSampleData(idx=i) for i in range(pFirstIndex, pLastIndex) ]
         recordDict = dict()
         storedFeaturesDict = dict()
         if len(data) < 1:
@@ -454,87 +483,80 @@ class DataContainer():
 
 class DataContainerWithScores(DataContainer):
     def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
-        if matrixfilepath is None:
-            msg = "This container only works when a cooler matrix is given"
+        if not isinstance(matrixfilepath, str):
+            msg = "This container only works when a (path to a) cooler matrix is given"
+            raise TypeError(msg)
+        super(DataContainerWithScores, self).__init__(chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None)
+        self.scoreArray = None
+        self.diamondsize = None
+        
+    def loadData(self, windowsize, flankingsize=None, maxdist=None, scaleFeatures=False, clampFeatures=False, scaleTargets=False, diamondsize=0):
+        super().loadData(windowsize=windowsize, flankingsize=flankingsize, maxdist=maxdist, scaleFeatures=scaleFeatures, clampFeatures=clampFeatures, scaleTargets=scaleTargets)
+        self.scoreArray = self.__computeScores(diamondsize=diamondsize)
+        self.diamondsize = diamondsize
+
+    def unloadData(self):
+        super().unloadData()
+        self.scoreArray = None
+        self.diamondsize = None
+
+    def __checkCompatibility(self, container):
+        compatible = super().__checkCompatibility(container)
+        compatible = compatible and ( type(self.scoreArray) == type(container.scoreArray) )
+        compatible = compatible and ( self.diamondsize == container.diamondsize )
+        return compatible
+
+    def __computeScores(self, diamondsize):
+        if self.sparseHiCMatrix is None:
+            msg = "Error: cannot compute scores when Hi-C matrix is missing"
+            raise RuntimeError(msg)
+        if not isinstance(diamondsize, int):
+            msg = "Error: size for insulation score computation must be integer"
+            raise TypeError(msg)
+        if self.sparseHiCMatrix.shape[0] - 2*diamondsize <= 1:
+            msg = "Error: Size for insulation score computation is too large for Hi-C matrix"
             raise ValueError(msg)
-        super(DataContainerWithScores, self).__init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None)
+        rowStartList, rowEndList, columnStartList, columnEndList = utils.getDiamondIndices(pMatsize=self.sparseHiCMatrix.shape[0], pDiamondsize=diamondsize)
+        l = [ self.sparseHiCMatrix[i:j,k:l].todense() for i,j,k,l in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
+        return np.array([ np.mean(i) for i in l ]).astype("float32")
 
-    def writeTFRecord(self, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None, pRecordSize=None, pDiamondsize=None):
-        '''
-        Write a dataset to disk in tensorflow TFRecord format
-        
-        Parameters:
-            pWindowsize (int): size of submatrices
-            pOutfolder (str): directory where TFRecords will be written
-            pFlankingsize (int): size of flanking regions left/right of submatrices
-            pMaxdist (int): cut the matrices off at this distance (in bins)
-            pRecordsize (int): split the TFRecords into multiple files containing approximately this number of samples
-        
-        Returns:
-            list of filenames written
-        '''
+    def __getScoreData(self, idx):
+        if self.scoreArray is None or self.diamondsize is None or not self.data_loaded:
+            msg = "Error: Load Data first"
+            raise RuntimeError(msg)
+        nr_diamonds = self.windowsize - 2*self.diamondsize
+        flankingsize = self.flankingsize
+        if not isinstance(flankingsize, int) or flankingsize < 0:
+            flankingsize = self.windowsize
+        if nr_diamonds <= 1:
+            msg = "Error: Size for computing insulation scores is too large / Windowsize too small"
+            raise ValueError(msg)
+        startInd = idx + flankingsize
+        endInd = startInd + nr_diamonds
+        return self.scoreArray[startInd:endInd]
 
-        windowsize = pWindowsize
-        flankingsize = windowsize
-        if pFlankingsize is not None and pFlankingsize > 0:
-            flankingsize = pFlankingsize
-        maxdist = pMaxdist
-        if pMaxdist is not None:
-            maxdist = min(pMaxdist, windowsize-1)
-        #get the number of samples
-        if self.binsize is None:
-            self.loadData()
-        nr_samples = self.getNumberSamples(flankingsize=flankingsize, windowsize=windowsize)
-        #adjust record size (yields smaller files and reduces memory load)
-        recordsize = nr_samples
-        if pRecordSize is not None and pRecordSize < recordsize:
-            recordsize = pRecordSize
-        #compute number of record files, number of samples 
-        #in each file and corresponding indices
-        nr_files = int( np.ceil(nr_samples/recordsize) )
-        target_ct = int( np.floor(nr_samples/nr_files) )
-        samples_per_file = [target_ct]*(nr_files-1) + [nr_samples-(nr_files-1)*target_ct]
-        sample_indices = [sum(samples_per_file[0:i]) for i in range(len(samples_per_file)+1)] 
-        #write the single files
-        folderName = self.chromatinFolder.rstrip("/").replace("/","-")
-        recordfiles = [os.path.join(pOutfolder, "{:s}_{:s}_{:03d}.tfrecord".format(folderName, str(self.chromosome), i + 1)) for i in range(nr_files)]
-        for recordfile, firstIndex, lastIndex in zip(recordfiles, sample_indices, sample_indices[1:]):
-            recordDict, storedFeaturesDict = self.__prepareWriteoutDict(pFirstIndex=firstIndex, 
-                                                                        pLastIndex=lastIndex, 
-                                                                        pWindowsize=windowsize, 
-                                                                        pOutfolder=pOutfolder,
-                                                                        pFlankingsize=flankingsize, 
-                                                                        pMaxdist=maxdist,
-                                                                        diamondsize=pDiamondsize)
-            records.writeTFRecord(pFilename=recordfile, pRecordDict=recordDict)
-        self.storedFiles = recordfiles
-        self.storedFeatures = storedFeaturesDict
-        return recordfiles
+    def getSampleData(self, idx):
+        if not self.data_loaded:
+            msg = "Warning: No data loaded"
+            print(msg)
+            return None
+        retDict = super().getSampleData(idx=idx)
+        retDict["out_scoreData"] = self.__getScoreData(idx=idx)
+        return retDict
 
-    def __prepareWriteoutDict(self, pFirstIndex, pLastIndex, pWindowsize, pOutfolder, pFlankingsize=None, pMaxdist=None, pDiamondsize=None):
-        recordDict, storedFeaturesDict = super().__prepareWriteoutDict(pFirstIndex=pFirstIndex,
-                                                                pLastIndex=pLastIndex,
-                                                                pWindowsize=pWindowsize,
-                                                                pOutfolder=pOutfolder,
-                                                                pFlankingsize=pFlankingsize,
-                                                                pMaxdist=pMaxdist)
-        diamondsizeInt = pDiamondsize
-        if not isinstance(pDiamondsize, int) or pDiamondsize > 0.75 * pWindowsize:
-            diamondsizeInt = int(0.25 * pWindowsize)
-        scoreData = [] 
-        for i in range(pFirstIndex, pLastIndex):
-            tmpMat = np.zeros(shape=(pWindowsize, pWindowsize))
-            indices = np.mask_indices(pWindowsize, utils.maskFunc, k=pMaxdist)
-            tmpMat[indices] = self.__getMatrixData(idx=i, flankingsize=pFlankingsize, windowsize=pWindowsize, maxdist=pMaxdist)
-            rowStartList, rowEndList, columnStartList, columnEndList = utils.getDiamondIndices(pMatsize=pWindowsize, pDiamondsize=diamondsizeInt)
-            l = [ tmpMat[i:j,k:l] for i,j,k,l in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
-            l = [ np.mean(i) for i in l]
-            scoreData.append(l)
-        recordDict["out_scoreData"] = np.array(scoreData)
-        storedFeaturesDict["out_scoreData"] = {"shape": recordDict["out_scoreData"].shape[1:], "dtype": tfdtypes.as_dtype(recordDict["out_scoreData"].dtype)}
-        return recordDict, storedFeaturesDict
-    
-    #todo: store the scores for the full matrix
-    #this allows getting scores for specific samples easily
-    #implement score printing function
-        
+    def plotInsulationScore(self, outpath, figuretype="png", index=None):
+        if not self.data_loaded:
+            msg = "Warning: No Data loaded, nothing to plot"
+            print(msg)
+            return
+        if self.scoreArray is None or self.diamondsize is None:
+            return
+        if isinstance(index, int):
+            tmpArray = self.__getScoreData(idx=index)
+        else:
+            tmpArray = self.scoreArray
+        matrixName = self.matrixfilepath.lstrip("/").replace("/","-")
+        filename = "scores_{:s}_chr{:s}_{:s}.{:s}".format(matrixName, str(self.chromosome), str(index), figuretype)
+        filename = os.path.join(outpath, filename)
+        titleStr = "Insulation score for\n{:s},\nchr{:s} at ws{:d}, ds{:d}".format(self.matrixfilepath, self.chromosome, self.windowsize, self.diamondsize)
+        utils.plotInsulationScore(pScoreArray=tmpArray, pFilename=filename, pTitle=titleStr, pStartbin=index+self.flankingsize+self.diamondsize, pBinsize=self.binsize)
