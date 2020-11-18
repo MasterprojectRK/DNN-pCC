@@ -1,5 +1,7 @@
 import utils
 import models
+import dataContainer
+import records
 import click
 import tensorflow as tf
 import numpy as np
@@ -45,15 +47,6 @@ def prediction(validationmatrix,
     
     predParamDict = locals().copy()
 
-    #load the trained model
-    try:
-        trainedModel = tf.keras.models.load_model(trainedmodel)
-    except Exception as e:
-        print(e)
-        msg = "Could not load trained model {:s}. Wrong file?"
-        msg = msg.format(trainedmodel)
-        raise SystemExit(msg)
-
     #load the param file and extract params;
     #required to decide about bin size 
     #and whether chromatin factors should be clamped and scaled
@@ -73,20 +66,19 @@ def prediction(validationmatrix,
         scalematrix = trainParamDict["scalematrix"] == "True"
         modelType = str(trainParamDict["modeltype"])
         nr_Factors = int(trainParamDict["nr_factors"])
-        factorNameSet = set([os.path.basename(trainParamDict["chromFactor_" + str(i)]) for i in range(nr_Factors)])
+        factorNameList = [os.path.basename(trainParamDict["chromFactor_" + str(i)]) for i in range(nr_Factors)]
     except Exception as e:
         msg = "Aborting. Parameter not in param file or wrong data type:\n{:s}"
         msg = msg.format(str(e))
         raise SystemExit(msg)
 
-    #backward compatibility with oder param files
+    #backward compatibility with older param files
+    #flankingsize used to be equal to windowsize and maxdist was not used
     flankingsize = None
     try:
         flankingsize = int(trainParamDict["flankingsize"])
     except:
         flankingsize = windowsize
-
-    #backward compatibility with oder param files
     maxdist = None
     try:
         maxdist = int(trainParamDict["maxdist"])
@@ -95,81 +87,103 @@ def prediction(validationmatrix,
     if maxdist is not None and maxdist > windowsize:
         msg = "Aborting. Parameters maxdist and windowsize from train parameter file colliding. Maxdist cannot be larger than windowsize."
         raise SystemExit(msg)
+    #score was not used previously
+    try:
+        includeScore = trainParamDict["includescore"] == "True"
+        scoreSize = int(trainParamDict["scoresize"])    
+    except:
+        includeScore = False
+        scoreSize = None
+    
+    #load the trained model
+    modelLoadParams = {"filepath": trainedmodel}
+    if includeScore:
+        modelLoadParams["custom_objects"] = {"customLoss": models.customLossWrapper(windowsize,scoreSize)}
+    try:
+        trainedModel = tf.keras.models.load_model(**modelLoadParams)
+    except Exception as e:
+        print(e)
+        msg = "Could not load trained model {:s} - Wrong file?"
+        msg = msg.format(trainedmodel)
+        raise SystemExit(msg)
 
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
         raise SystemExit(msg)
 
-    #extract chromosome names and size from the input
-    chromNameList = chromosome.rstrip().split(" ")  
+    #extract chromosome names from the input
+    chromNameList = chromosome.replace(",", " ").rstrip().split(" ")  
     chromNameList = sorted([x.lstrip("chr") for x in chromNameList])
 
-    #check chromatin files first
-    #if there are too few or too much, 
-    #we can already stop here.
-    chromFactorsDict = utils.checkGetChromsPresentInFactors([chromatinpath],chromNameList)
-    if chromFactorsDict[chromatinpath]["nr_factors"] != nr_Factors:
-        msg = "Too few or too many chromatin factors\n"
-        msg += "Folder {:s} - {:d}\n"
-        msg += "Trained model - {:d}"
-        msg = msg.format(chromatinpath,chromFactorsDict[chromatinpath]["nr_factors"],nr_Factors)
-        raise SystemExit(msg)
-    factorsInFolderSet = set([bigwigfile for bigwigfile in chromFactorsDict[chromatinpath]["bigwigs"]])
-    factorsDiff1 = factorNameSet - factorsInFolderSet
-    factorsDiff2 = factorsInFolderSet - factorNameSet
-    if len(factorsDiff1) > 0 or len(factorsDiff2) > 0:
-        msg = "Aborting. Different chromatin factor (bigwig-)filenames\n"
-        if len(factorsDiff1) > 0:
-            msg += "The following factors were in the training set, but are not in the folder {:s}\n"
-            msg = msg.format(chromatinpath)
-            msg += ", ".join(list(factorsDiff1))
-        if len(factorsDiff2) > 0:
-            msg += "The following factors are in the folder {:s}, but were not in the training set\n"
-            msg = msg.format(chromatinpath)
-            msg += ", ".join(list(factorsDiff2))
-        raise SystemExit(msg)
- 
-    if validationmatrix is not None:
-        #load matrix for evaluating the predictions, if present 
-        matricesDict = utils.checkGetChromsPresentInMatrices([validationmatrix],chromNameList)
-        utils.checkChromSizesMatching(matricesDict,chromFactorsDict,chromNameList)
-        utils.loadMatricesPerChrom(matricesDict,scalematrix,windowsize)
-    else:
-        #otherwise use a dummy dictionary so that the utils functions can be used
-        matricesDict = buildDummyMatrixDict(chromatinpath,chromNameList,binSizeInt,chromFactorsDict)
-
-    #load chromatin factor data
-    utils.loadChromatinFactorDataPerMatrix(pMatricesDict=matricesDict,
-                                            pChromFactorsDict=chromFactorsDict,
-                                            pChromosomes=chromNameList,
-                                            pScaleFactors=scalefactors,
-                                            pClampFactors=clampfactors)
-
-    #read the DNA sequence and do a one-hot encoding
-    utils.getCheckSequences(matricesDict,chromFactorsDict, sequencefile)
+    containerCls = dataContainer.DataContainer
+    if includeScore:
+        containerCls = dataContainer.DataContainerWithScores
+    testdataContainerList = []
+    for chrom in chromNameList:
+        testdataContainerList.append(containerCls(chromosome=chrom,
+                                                  matrixfilepath=validationmatrix,
+                                                  chromatinFolder=chromatinpath,
+                                                  sequencefilepath=sequencefile,
+                                                  binsize=binSizeInt)) 
+    #define the load params for the containers
+    loadParams = {"scaleFeatures": scalefactors,
+                  "clampFeatures": clampfactors,
+                  "scaleTargets": scalematrix,
+                  "windowsize": windowsize,
+                  "flankingsize": flankingsize,
+                  "maxdist": maxdist}
+    if includeScore:
+        loadParams["diamondsize"] = scoreSize
+    #now load the data and write TFRecords, one container at a time.
+    if len(testdataContainerList) == 0:
+        msg = "Exiting. No data found"
+        print(msg)
+        return #nothing to do
+    container0 = testdataContainerList[0]
+    tfRecordFilenames = []
+    for container in testdataContainerList:
+        container.loadData(**loadParams)
+        if not container0.checkCompatibility(container):
+            msg = "Aborting. Incompatible data"
+        tfRecordFilenames.append(container.writeTFRecord(pOutfolder=outputpath,
+                                                        pRecordSize=None)[0]) #list with 1 entry
+        container.unloadData()    
     
-    predictionDataGenerator = models.multiInputGenerator(matrixDict=None,
-                                                factorDict=chromFactorsDict,
-                                                batchsize=batchSizeInt,
-                                                windowsize=windowsize,
-                                                flankingsize=flankingsize,
-                                                binsize=binSizeInt,
-                                                shuffle=False,
-                                                maxdist=maxdist)  
+    #input check - chromatin factors must have the same names
+    #sufficient to compare against container0 due to above compatibility check
+    if container0.factorNames != factorNameList:
+        msg = "Aborting. The names of the chromatin factors are not equal\n"
+        msg += "Trained model:\n"
+        msg += "\n".join(factorNameList)
+        msg += "Bigwig files in folder {:s}:\n".format(chromatinpath)
+        msg += "\n".join(container0.factorNames)
+        raise SystemExit(msg)
+    
+    #build the TFData for prediction
+    storedFeaturesDict = container0.storedFeatures
+    testDs = tf.data.TFRecordDataset(tfRecordFilenames, 
+                                        num_parallel_reads=tf.data.experimental.AUTOTUNE,
+                                        compression_type="GZIP")
+    testDs = testDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    testDs = testDs.batch(batchSizeInt)
+    if validationmatrix is not None:
+        testDs = testDs.map(lambda x, y: x) #drop the target matrices (they are for evaluation)
+    testDs = testDs.prefetch(tf.data.experimental.AUTOTUNE)
 
     #feed the chromatin factors through the trained model
-    predMatrixArray = trainedModel.predict(predictionDataGenerator,batch_size=batchSizeInt)
+    predMatrixArray = trainedModel.predict(testDs)[0]
     
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
-    chrLengthInBinsList = [chromFactorsDict[chromatinpath]["data"][chrom].shape[0] - (windowsize + 2*flankingsize) + 1  for chrom in chromNameList]
-    if sum(chrLengthInBinsList) != predMatrixArray.shape[0]:
+    chrLengthList = [container.chromSize_factors for container in testdataContainerList]
+    chrLengthList = [int(np.ceil(entry / binSizeInt)) - (2*flankingsize + windowsize) + 1 for entry in chrLengthList]
+    if sum(chrLengthList) != predMatrixArray.shape[0]:
         msg = "Aborting. Failed separating prediction into single chromosomes"
         raise SystemExit(msg)
     #now split the prediction up into arrays of submatrices for each chromosome
     #scale predicted submatrices to 0...1
-    indicesList = [sum(chrLengthInBinsList[0:i]) for i in range(len(chrLengthInBinsList)+1)]
+    indicesList = [sum(chrLengthList[0:i]) for i in range(len(chrLengthList)+1)]
     matrixPerChromList = []
     for i,j in zip(indicesList, indicesList[1:]):
         matrixPerChromList.append( utils.scaleArray(predMatrixArray[i:j,:]) * multiplier)
@@ -181,7 +195,7 @@ def prediction(validationmatrix,
                                                     pWindowSize=windowsize,
                                                     pFlankingSize=flankingsize,
                                                     pMaxDist=maxdist )
-    coolerMatrixName = outputpath + "predMatrix.cool"
+    coolerMatrixName = os.path.join(outputpath, "predMatrix.cool")
     metadata = {"trainParams": trainParamDict, "predParams": predParamDict}
     utils.writeCooler(pMatrixList=matrixPerChromList,
                      pBinSizeInt=binSizeInt,
@@ -192,41 +206,27 @@ def prediction(validationmatrix,
     #If target matrix provided, compute loss 
     #to assess prediction quality
     if validationmatrix is not None:
-        evalGenerator = models.multiInputGenerator(matrixDict=matricesDict,
-                                                  factorDict=chromFactorsDict,
-                                                  batchsize=batchSizeInt,
-                                                  windowsize=windowsize,
-                                                  flankingsize=flankingsize,
-                                                  binsize=binSizeInt,
-                                                  shuffle=False,
-                                                  maxdist=maxdist)
-        loss = trainedModel.evaluate(evalGenerator)
-        print("loss: {:.3f}".format(loss))
+        evalDs = tf.data.TFRecordDataset(tfRecordFilenames, 
+                                        num_parallel_reads=tf.data.experimental.AUTOTUNE,
+                                        compression_type="GZIP")
+        evalDs = evalDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        evalDs = evalDs.batch(batchSizeInt)
+        evalDs = evalDs.prefetch(tf.data.experimental.AUTOTUNE)
+        
+        loss = trainedModel.evaluate(evalDs)
+        if includeScore:
+            msg = "total loss: {:.3f} - matrix loss: {:.3f} - score loss: {:.3f}"
+            msg = msg.format(loss[0], loss[1], loss[2])
+        else:
+            msg = "loss: {:.3f}".format(loss)
+        print(msg)
 
     #store results
-    parameterFile = outputpath + "predParams.csv"    
+    parameterFile = os.path.join(outputpath, "predParams.csv")    
     with open(parameterFile, "w") as csvfile:
         dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(predParamDict.keys())))
         dictWriter.writeheader()
         dictWriter.writerow(predParamDict)
-
-
-
-def buildDummyMatrixDict(pChromPath, pChromNameList, pBinsize, pFactorDict):
-    firstBigwigFile = list(pFactorDict[pChromPath]["bigwigs"].keys())[0]
-    chromName = pFactorDict[pChromPath]["bigwigs"][firstBigwigFile]["namePrefix"] + pChromNameList[0]
-    chromSize = pFactorDict[pChromPath]["bigwigs"][firstBigwigFile]["chromsizes"][chromName]
-    chromSize = int(np.ceil(chromSize/pBinsize))
-    dummyDict = dict()
-    dummyDict["dummy"] = dict()
-    dummyDict["dummy"]["data"] = dict()
-    dummyDict["dummy"]["binsize"] = pBinsize
-    dummyDict["dummy"]["namePrefix"] = ""
-    dummyDict["dummy"]["data"][pChromNameList[0]] = sparse.csr_matrix((chromSize,chromSize),dtype=bool)
-    return dummyDict
-
-
-
 
 
 if __name__ == "__main__":
