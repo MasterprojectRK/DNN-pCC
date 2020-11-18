@@ -227,7 +227,10 @@ def prediction(validationmatrix,
         dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(predParamDict.keys())))
         dictWriter.writeheader()
         dictWriter.writerow(predParamDict)
-
+    
+    for record in tfRecordFilenames:
+        if os.path.exists(record):
+            os.remove(record)
 
 if __name__ == "__main__":
     prediction() #pylint: disable=no-value-for-parameter
