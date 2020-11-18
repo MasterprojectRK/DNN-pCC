@@ -258,9 +258,18 @@ def training(trainmatrices,
     validationdataRecords = [item for sublist in tfRecordFilenames[len(traindataContainerList):] for item in sublist]    
     
 
-    #because of compatibility checks above, just use data from first container
-    binsize = container0.binsize
+    #different binsizes are ok, as long as no sequence is used
+    #not clear which binsize to use for prediction when they differ during training.
+    #For now, store the max. 
+    binsize = max([container.binsize for container in traindataContainerList])
+    paramDict["binsize"] = binsize
+    #because of compatibility checks above, 
+    #the following properties are the same with all containers,
+    #so just use data from first container
     nr_factors = container0.nr_factors
+    paramDict["nr_factors"] = nr_factors
+    for i in range(nr_factors):
+        paramDict["chromFactor_" + str(i)] = container0.factorNames[i]
     sequenceSymbols = container0.sequenceSymbols
     nr_symbols = None
     if isinstance(sequenceSymbols, set):
