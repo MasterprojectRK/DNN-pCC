@@ -1019,3 +1019,21 @@ def getDiamondIndices(pMatsize, pDiamondsize):
     columnStartList = [i+1 for i in rowEndList]
     columnEndList = [i+pDiamondsize for i in columnStartList]
     return rowStartList, rowEndList, columnStartList, columnEndList
+
+def plotInsulationScore(pScoreArray, pFilename, pTitle=None, pStartbin=None, pBinsize=None):
+    if len(pScoreArray.shape) != 1:
+        return
+    if not isinstance(pFilename, str):
+        return
+    x_values = np.arange(pScoreArray.shape[0])
+    if isinstance(pStartbin, int) and isinstance(pBinsize, int):
+        x_values += pStartbin
+        x_values *= pBinsize
+    fig1, ax1 = plt.subplots()
+    ax1.plot(x_values, pScoreArray)
+    ax1.set_xlabel("genomic position")
+    ax1.set_ylabel("insulation score")
+    ax1.grid(True)
+    if pTitle is not None:
+        ax1.set_title(str(pTitle))
+    fig1.savefig(pFilename)
