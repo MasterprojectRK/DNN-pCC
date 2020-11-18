@@ -564,4 +564,8 @@ class DataContainerWithScores(DataContainer):
         filename = "scores_{:s}_chr{:s}_{:s}.{:s}".format(matrixName, str(self.chromosome), str(index), figuretype)
         filename = os.path.join(outpath, filename)
         titleStr = "Insulation score for\n{:s},\nchr{:s} at ws{:d}, ds{:d}".format(self.matrixfilepath, self.chromosome, self.windowsize, self.diamondsize)
-        utils.plotInsulationScore(pScoreArray=tmpArray, pFilename=filename, pTitle=titleStr, pStartbin=index+self.flankingsize+self.diamondsize, pBinsize=self.binsize)
+        startbin = self.flankingsize + self.diamondsize
+        if isinstance(index, int):
+            startbin += index
+        utils.plotInsulationScore(pScoreArray=tmpArray, pFilename=filename, pTitle=titleStr, pStartbin=startbin, pBinsize=self.binsize)
+
