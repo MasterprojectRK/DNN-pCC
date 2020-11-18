@@ -262,8 +262,9 @@ class DataContainer():
             return False
         if container.chromatinFolder is not None and container.nr_factors is None:
             return False
-        #if chromatin factors are present, the number of chromatin factors must match
+        #if chromatin factors are present, the numbers and names of chromatin factors must match
         factorsOK = factorsOK and (self.nr_factors == container.nr_factors)
+        factorsOK = factorsOK and (self.factorNames == container.factorNames)
         #sanity check loading of DNA sequences
         if self.sequencefilepath is not None and self.sequenceSymbols is None:
             return False
@@ -271,6 +272,10 @@ class DataContainer():
             return False
         #if DNA sequences are present, the number of symbols must match
         sequenceOK = sequenceOK and (self.sequenceSymbols == container.sequenceSymbols)
+        #if DNA sequences are present, the binsizes must match
+        #because the input shape of the network depends on it
+        if self.sequencefilepath is not None:
+            sequenceOK = sequenceOK and (self.binsize == container.binsize)
         return factorsOK and matrixOK and sequenceOK and windowsizeOK and flankingsizeOK and maxdistOK
         
     def writeTFRecord(self, pOutfolder, pRecordSize=None):
