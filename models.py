@@ -439,7 +439,7 @@ class CustomReshapeLayer(tf.keras.layers.Layer):
         self.triu_indices = [ [x,y] for x,y in zip(np.triu_indices(self.matsize)[0], np.triu_indices(self.matsize)[1]) ]
 
     def call(self, inputs):      
-        return tf.map_fn(self.pickItems, inputs)
+        return tf.map_fn(self.pickItems, inputs, parallel_iterations=20, swap_memory=True)
     
     def pickItems(self, inputVec):
         sparseTriuTens = tf.SparseTensor(self.triu_indices, 
@@ -462,7 +462,7 @@ class TadInsulationScoreLayer(tf.keras.layers.Layer):
             raise ValueError(msg)
     
     def call(self, inputs):
-        return tf.map_fn(self.pickItems, inputs)
+        return tf.map_fn(self.pickItems, inputs, parallel_iterations=20, swap_memory=True)
 
     def pickItems(self, inputMat):
         nr_diamonds = self.matsize - 2*self.diamondsize
