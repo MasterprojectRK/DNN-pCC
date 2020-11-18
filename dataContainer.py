@@ -37,7 +37,7 @@ class DataContainer():
         #ensure that binsizes for matrix (if given) and factors match
         if self.binsize is None:
             msg = "No binsize given; use a Hi-C matrix or explicitly specify binsize for the container"   
-            raise ValueError(msg)
+            raise TypeError(msg)
         ###load data for a specific chromsome
         #get the names of the bigwigfiles
         bigwigFileList = utils.getBigwigFileList(self.chromatinFolder)
@@ -58,13 +58,13 @@ class DataContainer():
             except Exception as e:
                 msg = str(e) + "\n"
                 msg += "Could not load data from bigwigfile {}".format(bigwigFile) 
-                raise ValueError(msg)
+                raise IOError(msg)
         #the chromosome lengths should be equal in all bigwig files
         if len(set(chromSizeList)) != 1 and not ignoreChromLengths:
             msg = "Invalid data. Chromosome lengths differ in bigwig files:"
             for i, filename in enumerate(bigwigFileList):
                 msg += "{:s}: {:d}\n".format(filename, chromSizeList[i])
-            raise ValueError(msg)
+            raise IOError(msg)
         elif len(set(chromSizeList)) != 1 and ignoreChromLengths:
             chromSize_factors = min(chromSizeList)
         else:
@@ -74,12 +74,12 @@ class DataContainer():
                 and self.chromSize_matrix != chromSize_factors:
             msg = "Chrom lengths not equal between matrix and bigwig files\n"
             msg += "Matrix: {:d} -- Factors: {:d}".format(self.chromSize_matrix, chromSize_factors)
-            raise ValueError(msg)
+            raise IOError(msg)
         if self.chromSize_sequence is not None \
                 and self.chromSize_sequence != chromSize_factors:
             msg = "Chrom lengths not equal between sequence and bigwig files\n"
             msg += "Sequence: {:d} -- Factors: {:d}".format(self.chromSize_sequence, chromSize_factors)
-            raise ValueError(msg)
+            raise IOError(msg)
         #load the data into memory now
         self.factorNames = [os.path.splitext(os.path.basename(name))[0] for name in bigwigFileList]
         self.nr_factors = len(self.factorNames)
@@ -89,6 +89,7 @@ class DataContainer():
         self.FactorDataArray = np.empty(shape=(len(bigwigFileList),nr_bins))
         msg = "Loaded {:d} chromatin features from folder {:s}\n"
         msg = msg.format(self.nr_factors, self.chromatinFolder)
+        featLoadedMsgList = [] #pretty printing for features loaded
         for i, bigwigFile in enumerate(bigwigFileList):
             chromname = self.prefixDict_factors[bigwigFile] + self.chromosome
             tmpArray = utils.binChromatinFactor(pBigwigFileName=bigwigFile,
@@ -102,10 +103,11 @@ class DataContainer():
             self.FactorDataArray[i] = tmpArray
             nr_nonzero_abs = np.count_nonzero(tmpArray)
             nr_nonzero_perc = nr_nonzero_abs / tmpArray.size * 100
-            msg += "{:s} - min. {:.3f} - max {:.3f} - nonzero {:d} ({:.2f}%)\n"
-            msg = msg.format(bigwigFile, tmpArray.min(), tmpArray.max(), nr_nonzero_abs, nr_nonzero_perc)
+            msg2 = "{:s} - min. {:.3f} - max. {:.3f} - nnz. {:d} ({:.2f}%)"
+            msg2 = msg2.format(bigwigFile, tmpArray.min(), tmpArray.max(), nr_nonzero_abs, nr_nonzero_perc)
+            featLoadedMsgList.append(msg2)
         self.FactorDataArray = np.transpose(self.FactorDataArray)
-        print(msg)
+        print(msg + "\n".join(featLoadedMsgList))
             
     def __loadMatrixData(self, scaleMatrix=False):
         #load Hi-C matrix from cooler file
@@ -119,7 +121,7 @@ class DataContainer():
         except:
             msg = "Error: Could not load data from Hi-C matrix {:s}"
             msg = msg.format(self.matrixfilepath)
-            raise ValueError(msg)
+            raise IOError(msg)
         #scale to 0..1, if requested
         if scaleMatrix:
             sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)       
@@ -128,7 +130,7 @@ class DataContainer():
             msg = "Chromsize of matrix does not match bigwig files\n"
             msg += "Matrix: {:d} -- Bigwig files: {:d}"
             msg = msg.format(chromsize_matrix, self.chromSize_factors)
-            raise ValueError(msg)
+            raise IOError(msg)
         self.chromSize_matrix = chromsize_matrix
         #ensure that binsizes for matrix and factors (if given) match
         if self.binsize is None or self.binsize == binsize:
@@ -138,11 +140,10 @@ class DataContainer():
             msg = "Matrix has wrong binsize\n"
             msg += "Matrix: {:d} -- Binned chromatin factors {:d}"
             msg = msg.format(binsize, self.binsize)
-            raise ValueError(msg)
-        msg = "Loaded chromosome {:s} from cooler matrix {:s}\n"
-        msg = msg.format(self.chromosome, self.matrixfilepath)
-        msg += "Matrix shape {:d}x{:d} -- min {:d} -- max {:d}"
-        msg = msg.format(self.sparseHiCMatrix.shape[0], self.sparseHiCMatrix.shape[1], int(self.sparseHiCMatrix.min()), int(self.sparseHiCMatrix.max()))
+            raise IOError(msg)
+        msg = "Loaded cooler matrix {:s}\n".format(self.matrixfilepath)
+        msg += "chr. {:s}, matshape {:d}*{:d} -- min. {:d} -- max. {:d} -- nnz. {:d}"
+        msg = msg.format(self.chromosome, self.sparseHiCMatrix.shape[0], self.sparseHiCMatrix.shape[1], int(self.sparseHiCMatrix.min()), int(self.sparseHiCMatrix.max()), self.sparseHiCMatrix.getnnz() )
         print(msg)
 
     def __loadSequenceData(self):
@@ -153,8 +154,9 @@ class DataContainer():
             records = SeqIO.index(self.sequencefilepath, format="fasta")
         except Exception as e:
             print(e)
-            msg = "Could not read sequence file. Wrong format?"
-            raise SystemExit(msg)
+            msg = "Could not read sequence file {:s}. Wrong format?"
+            msg = msg.format(self.sequencefilepath)
+            raise IOError(msg)
         seqIdList = list(records)
         chromname = ""
         if "chr" + self.chromosome in seqIdList:
@@ -166,19 +168,19 @@ class DataContainer():
         else:
             msg = "Chromsome {:s} is missing in sequence file {:s}"
             msg = msg.format(self.chromosome, self.sequencefilepath)
-            raise ValueError(msg)
+            raise IOError(msg)
         #length check
         chromLengthSequence = len(records[ chromname ])
         if self.chromSize_factors is not None and self.chromSize_factors != chromLengthSequence:
             msg = "Chromosome {:s} in sequence file {:s} has wrong length\n"
             msg += "Chrom. factors: {:d} - Sequence File {:d}"    
             msg = msg.format(chromname, self.sequencefilepath, self.chromSize_factors, chromLengthSequence)
-            raise ValueError(msg)
+            raise RuntimeError(msg)
         elif self.chromSize_matrix is not None and self.chromSize_matrix != chromLengthSequence:
             msg = "Chromosome {:s} in sequence file {:s} has wrong length\n"
             msg += "Matrix: {:d} - Sequence File {:d}"    
             msg = msg.format(chromname, self.sequencefilepath, self.chromSize_matrix, chromLengthSequence)
-            raise ValueError(msg)    
+            raise RuntimeError(msg)    
         else:
             self.chromSize_sequence = chromLengthSequence
         #load the data    
@@ -312,7 +314,7 @@ class DataContainer():
         #check if all features have the same number of samples
         if len(set( [x for x in nr_samples_list if x>0] )) != 1:
             msg = "Error: sample binning / DNA sequence encoding went wrong"
-            raise ValueError(msg)
+            raise RuntimeError(msg)
         return max(nr_samples_list)
 
     def __getMatrixData(self, idx, flankingsize, windowsize, maxdist):
@@ -441,7 +443,7 @@ class DataContainer():
         storedFeaturesDict = dict()
         if len(data) < 1:
             msg = "Error: No data to write"
-            raise ValueError(msg)
+            raise RuntimeError(msg)
         for key in data[0]:
             featData = [feature[key] for feature in data]
             if not any(elem is None for elem in featData):
