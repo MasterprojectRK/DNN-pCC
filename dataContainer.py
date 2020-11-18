@@ -6,6 +6,7 @@ from Bio import SeqIO
 from tensorflow import dtypes as tfdtypes
 from scipy.sparse import save_npz, csr_matrix
 from tqdm import tqdm
+import pandas as pd
 
 class DataContainer():
     def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
@@ -569,3 +570,31 @@ class DataContainerWithScores(DataContainer):
             startbin += index
         utils.plotInsulationScore(pScoreArray=tmpArray, pFilename=filename, pTitle=titleStr, pStartbin=startbin, pBinsize=self.binsize)
 
+    def saveInsulationScoreToBed(self, outpath, index=None):
+        if not self.data_loaded:
+            msg = "Warning: No Data loaded, nothing to plot"
+            print(msg)
+            return
+        if self.scoreArray is None or self.diamondsize is None:
+            return
+        if self.windowsize is None or self.flankingsize is None:
+            return
+        #create the start- and end position list
+        posList = [i for i in range(0,self.chromSize_matrix,self.binsize)] + [self.chromSize_matrix]
+        startList = [i for i, j in zip(posList, posList[1:])]
+        endList = [j for i, j in zip(posList, posList[1:])]
+        scores = [0]*self.diamondsize + list(self.scoreArray) + [0]*self.diamondsize
+        df = pd.DataFrame(columns=["chrom", "chromStart", "chromEnd", "name", "score"])
+        df["chromStart"] = startList
+        df["chromEnd"] = endList
+        df["score"] = scores
+        df["chrom"] = self.chromosome
+        print(df.head(16))
+        if isinstance(index, int) and index < self.getNumberSamples():
+            startInd = index + self.flankingsize + self.diamondsize
+            endInd = startInd + self.windowsize - 2*self.diamondsize
+            df = df.loc[startInd:endInd,:]
+        matrixName = self.matrixfilepath.lstrip("/").replace("/","-")
+        filename = "scores_{:s}_chr{:s}_ds{:d}_{:s}.bed".format(matrixName, str(self.chromosome), self.diamondsize, str(index))
+        filename = os.path.join(outpath, filename)
+        df.to_csv(filename, sep="\t", header=False, index=False)
