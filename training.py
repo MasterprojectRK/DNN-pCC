@@ -243,23 +243,15 @@ def training(trainmatrices,
                 idx = debugstate
             else:
                 idx = None
-            container.plotFeatureAtIndex(idx=idx, 
-                                         flankingsize=flankingsize, 
-                                         windowsize=windowsize, 
-                                         maxdist=maxdist,
+            container.plotFeatureAtIndex(idx=idx,
                                          outpath=outputpath,
                                          figuretype=figuretype)
-            container.saveMatrix(flankingsize=flankingsize, 
-                                 windowsize=windowsize,
-                                 maxdist=maxdist, 
-                                 outputpath=outputpath,
+            container.saveMatrix(outputpath=outputpath,
                                  index=idx)
             if isinstance(container, dataContainer.DataContainerWithScores):
-                container.plotInsulationScore(flankingsize=flankingsize, 
-                                                windowsize=windowsize, 
-                                                outpath=outputpath, 
-                                                figuretype=figuretype, 
-                                                index=idx)
+                container.plotInsulationScore(outpath=outputpath, 
+                                              figuretype=figuretype, 
+                                              index=idx)
         nr_samples_list.append(container.getNumberSamples())
         container.unloadData()
     traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
