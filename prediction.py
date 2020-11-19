@@ -116,7 +116,7 @@ def prediction(validationmatrix,
     chromNameList = sorted([x.lstrip("chr") for x in chromNameList])
 
     containerCls = dataContainer.DataContainer
-    if includeScore:
+    if includeScore and validationmatrix is not None:
         containerCls = dataContainer.DataContainerWithScores
     testdataContainerList = []
     for chrom in chromNameList:
@@ -132,7 +132,7 @@ def prediction(validationmatrix,
                   "windowsize": windowsize,
                   "flankingsize": flankingsize,
                   "maxdist": maxdist}
-    if includeScore:
+    if includeScore and validationmatrix is not None:
         loadParams["diamondsize"] = scoreSize
     #now load the data and write TFRecords, one container at a time.
     if len(testdataContainerList) == 0:
