@@ -101,7 +101,7 @@ tf.random.set_seed(35)
                 default="SGD", show_default=True,
                 help="Optimizer to use: SGD, Adam, RMSprop or cosine similarity.")
 @click.option("--loss", "-l", required=False,
-                type=click.Choice(["MSE", "Huber", "MAE", "MAPE", "MSLE", "Cosine"]),
+                type=click.Choice(["MSE", "Huber0.1", "Huber0.5", "Huber1.0", "Huber5.0", "Huber10.0" "Huber100.0", "Huber1000.0", "MAE", "MAPE", "MSLE", "Cosine"]),
                 default="MSE", show_default=True,
                 help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity.")
 @click.option("--earlyStopping", "-early",
@@ -408,8 +408,12 @@ def getLosses(pLossStr, includeScore=False, windowsize=None, diamondsize=None, s
     loss_weights = None
     if pLossStr == "MSE":
         loss_fn = tf.keras.losses.MeanSquaredError()
-    elif pLossStr == "Huber":
-        loss_fn = tf.keras.losses.Huber(delta=2.5)
+    elif pLossStr.startswith("Huber"):
+        try:
+            delta = float(pLossStr.lstrip("Huber"))
+            loss_fn = tf.keras.losses.Huber(delta=delta)       
+        except:
+            loss_fn = tf.keras.losses.Huber()
     elif pLossStr == "MAE":
         loss_fn = tf.keras.losses.MeanAbsoluteError()
     elif pLossStr == "MAPE":
