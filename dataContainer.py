@@ -356,7 +356,7 @@ class DataContainer():
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, self.maxdist)]
         else: #triangles, i. e. full submatrices
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(windowsize)]
-        trainmatrix = np.nan_to_num(trainmatrix)
+        trainmatrix = np.array(np.nan_to_num(trainmatrix))[0,:]
         return trainmatrix
     
     def __getSequenceData(self, idx):
