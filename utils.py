@@ -215,6 +215,7 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
 
     if pMatrixList is None or pChromosomeList is None or pBinSizeInt is None or pOutfile is None:
         msg = "input empty. No cooler matrix written"
+        print(msg)
         return
     if len(pMatrixList) != len(pChromosomeList):
         msg = "number of input arrays and chromosomes must be the same"
@@ -222,10 +223,10 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
         return
     if pChromSizeList is not None and len(pChromSizeList) != len(pChromosomeList):
         msg = "if chrom sizes are given, they must be provided for ALL chromosomes"
-    
+        print(msg)
+        return
     bins = pd.DataFrame(columns=['chrom','start','end'])
     pixels = pd.DataFrame(columns=['bin1_id','bin2_id','count']) 
-    
     
     for i, (matrix, chrom) in enumerate(zip(pMatrixList,pChromosomeList)):
         #the chromosome size may not be integer-divisible by the bin size
