@@ -12,6 +12,7 @@ from scipy import sparse
 from Bio import SeqIO
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn import metrics as metrics
+import pandas as pd
 
 def getBigwigFileList(pDirectory):
     #returns a list of bigwig files in pDirectory
@@ -208,6 +209,32 @@ def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=N
         count_matrix[j:k,j:k] += np.ones((pWindowSize,pWindowSize),dtype=int) #keep track of how many matrices have contributed to each position
     mean_matrix[count_matrix!=0] = sum_matrix[count_matrix!=0] / count_matrix[count_matrix!=0]
     return mean_matrix
+
+def rebuildScore(pArrayOfTriangles, pWindowsize, pScoresize, pFlankingsize=None):
+    if pFlankingsize == None:
+        flankingSize = pWindowsize
+    else:
+        flankingSize = pFlankingsize
+    nr_matrices = pArrayOfTriangles.shape[0]
+    original_matrix_shape = nr_matrices - 1 + (pWindowsize+2*flankingSize)
+    sum_array = np.zeros( original_matrix_shape )
+    count_array = np.zeros_like(sum_array,dtype=int)    
+    mean_array = np.zeros_like(sum_array,dtype="float32")
+    tmp_mat = np.zeros((pWindowsize, pWindowsize))
+    for i in tqdm(range(nr_matrices), "rebuilding score"):
+        tmp_mat[np.triu_indices(pWindowsize)] = pArrayOfTriangles[i]
+        rowStartList, rowEndList, columnStartList, columnEndList = getDiamondIndices(pWindowsize, pScoresize)
+        l = [tmp_mat[i1:i2,j1:j2] for i1,i2,j1,j2 in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
+        l = np.array([np.mean(elem) for elem in l]).astype("float32")
+        #the first predicted matrix (i=0) starts at position 0 + flankingSize (boundary handling)
+        #the first predicted score vector starts at position 0 + flankingSize + scoreSize
+        #and has a length of pWindowsize - 2*pScoresize
+        startInd = i + flankingSize + pScoresize 
+        stopInd = startInd + pWindowsize - 2*pScoresize
+        sum_array[startInd:stopInd] += l
+        count_array[startInd:stopInd] += np.ones( pWindowsize-2*pScoresize, dtype=int ) 
+    mean_array[count_array!=0] = sum_array[count_array!=0] / count_array[count_array!=0]
+    return mean_array[pScoresize:-pScoresize] #cut away the flanking areas, since they are missing in the target array, too
 
 def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeList=None,  pMetadata=None):
     #takes a matrix as numpy array or sparse matrix and writes a cooler matrix from it
@@ -1038,3 +1065,21 @@ def plotInsulationScore(pScoreArray, pFilename, pTitle=None, pStartbin=None, pBi
     if pTitle is not None:
         ax1.set_title(str(pTitle))
     fig1.savefig(pFilename)
+
+def saveInsulationScoreToBedgraph(scoreArray, chromSize_matrix, binsize, diamondsize, chromosome, filename, startbin=None):
+    posList = [i for i in range(0,chromSize_matrix,binsize)] + [chromSize_matrix]
+    startList = [i for i, j in zip(posList, posList[1:])]
+    endList = [j for i, j in zip(posList, posList[1:])]
+    scores = [0]*diamondsize + list(scoreArray) + [0]*diamondsize
+    df = pd.DataFrame(columns=["chrom", "chromStart", "chromEnd", "dataValue"])
+    df["chromStart"] = startList
+    df["chromEnd"] = endList
+    df["dataValue"] = scores
+    df["chrom"] = chromosome
+    if isinstance(startbin, int):
+        df["chromStart"] += (startbin * binsize)
+        df["chromEnd"] += (startbin * binsize)
+    with open(filename, "w") as bgf:
+            bgf.write("track type=bedGraph\n")
+            df.to_csv(bgf, sep="\t", header=False, index=False)
+    
