@@ -162,7 +162,7 @@ def prediction(validationmatrix,
     #build the TFData for prediction
     storedFeaturesDict = container0.storedFeatures
     testDs = tf.data.TFRecordDataset(tfRecordFilenames, 
-                                        num_parallel_reads=tf.data.experimental.AUTOTUNE,
+                                        num_parallel_reads=None,
                                         compression_type="GZIP")
     testDs = testDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
     testDs = testDs.batch(batchSizeInt)
@@ -230,7 +230,7 @@ def prediction(validationmatrix,
     #to assess prediction quality
     if validationmatrix is not None:
         evalDs = tf.data.TFRecordDataset(tfRecordFilenames, 
-                                        num_parallel_reads=tf.data.experimental.AUTOTUNE,
+                                        num_parallel_reads=None, #otherwise samples will be interleaved
                                         compression_type="GZIP")
         evalDs = evalDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         evalDs = evalDs.batch(batchSizeInt)
