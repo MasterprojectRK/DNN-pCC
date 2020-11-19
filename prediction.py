@@ -171,7 +171,7 @@ def prediction(validationmatrix,
     testDs = testDs.prefetch(tf.data.experimental.AUTOTUNE)
 
     #feed the chromatin factors through the trained model
-    predMatrixArray = trainedModel.predict(testDs)[0]
+    predMatrixArray = trainedModel.predict(testDs)[0] #the two outputs are identical
     
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
@@ -186,15 +186,38 @@ def prediction(validationmatrix,
     indicesList = [sum(chrLengthList[0:i]) for i in range(len(chrLengthList)+1)]
     matrixPerChromList = []
     for i,j in zip(indicesList, indicesList[1:]):
-        matrixPerChromList.append( utils.scaleArray(predMatrixArray[i:j,:]) * multiplier)
-    
-    #rebuild the cooler matrices from the overlapping 
-    #submatrices for each chromosome and write to disk
+        #matrixPerChromList.append( utils.scaleArray(predMatrixArray[i:j,:]) * multiplier)
+        matrixPerChromList.append(predMatrixArray[i:j,:])
+
+    #in case we need scores, compute them, too
+    if includeScore:
+        scorePerChromList = [utils.rebuildScore(pArrayOfTriangles=elem, 
+                                                pWindowsize=windowsize,
+                                                pFlankingsize=flankingsize,
+                                                pScoresize=scoreSize) for elem in matrixPerChromList]
+        for chromname, score in zip(chromNameList, scorePerChromList):
+            filename = "scorePrediction_chr{:s}_ds{:d}.bedgraph".format(chromname, scoreSize)
+            filename = os.path.join(outputpath, filename)
+            utils.saveInsulationScoreToBedgraph(scoreArray=score, 
+                                                chromSize_matrix=(score.shape[0] + 2*scoreSize)*binSizeInt, 
+                                                binsize=binSizeInt, 
+                                                diamondsize=scoreSize, 
+                                                chromosome=chromname, 
+                                                filename=filename, 
+                                                startbin=0)
+            
+            pass #store bedgraph
+
+    #rebuild the matrices from the overlapping 
+    #submatrices for each chromosome
     for i, matrix in enumerate(matrixPerChromList):
         matrixPerChromList[i] = utils.rebuildMatrix(pArrayOfTriangles=matrix, 
                                                     pWindowSize=windowsize,
                                                     pFlankingSize=flankingsize,
                                                     pMaxDist=maxdist )
+    #scale the re-assembled matrices into range [0..multiplier]
+    matrixPerChromList = [utils.scaleArray(matrix) * multiplier for matrix in matrixPerChromList]
+    #write cooler matrices to disk
     coolerMatrixName = os.path.join(outputpath, "predMatrix.cool")
     metadata = {"trainParams": trainParamDict, "predParams": predParamDict}
     utils.writeCooler(pMatrixList=matrixPerChromList,
