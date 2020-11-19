@@ -171,8 +171,9 @@ def prediction(validationmatrix,
     testDs = testDs.prefetch(tf.data.experimental.AUTOTUNE)
 
     #feed the chromatin factors through the trained model
-    predMatrixArray = trainedModel.predict(testDs)[0] #the two outputs are identical
-    
+    predMatrixArray = trainedModel.predict(testDs)
+    if includeScore:
+        predMatrixArray = predMatrixArray[0] #the two outputs are identical
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
