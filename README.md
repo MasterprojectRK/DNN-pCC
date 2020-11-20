@@ -13,20 +13,14 @@ It is recommended to use [conda](https://docs.conda.io/en/latest/miniconda.html)
 ```
 conda create -n YOUR_ENVIRONMENT_NAME
 conda activate YOUR_ENVIRONMENT_NAME
+conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels conda-forge
 ```
 DNN-pCC depends on the following packages, which need to be installed:
 ```
-conda install -c anaconda tensorflow-gpu #or just "tensorflow" if no GPU available
-conda install pybigwig
-conda install cooler
-conda install scipy
-conda install matplotlib
-conda install tqdm
-conda install click
-conda install pydot
-conda install sklearn
-conda install pydot
-conda install graphviz
+conda install cooler=0.8.5 pybigwig=0.3.17 scipy=1.5.2 matplotlib=3.3.2 tqdm=4.50.2 pydot=1.4.1 scikit-learn=0.23.2 graphviz=2.42.3
+conda install -c anaconda click=7.1.2 tensorflow-gpu=2.2.0
 ```
 
 ## Usage
