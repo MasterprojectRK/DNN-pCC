@@ -9,6 +9,7 @@ import csv
 import ast
 import os
 from scipy import sparse
+from tqdm import tqdm
 
 
 @click.option("--validationmatrix","-vm", required=False,
@@ -191,23 +192,21 @@ def prediction(validationmatrix,
         matrixPerChromList.append(predMatrixArray[i:j,:])
 
     #in case we need scores, compute them, too
-    if includeScore:
-        scorePerChromList = [utils.rebuildScore(pArrayOfTriangles=elem, 
-                                                pWindowsize=windowsize,
-                                                pFlankingsize=flankingsize,
-                                                pScoresize=scoreSize) for elem in matrixPerChromList]
-        for chromname, score in zip(chromNameList, scorePerChromList):
-            filename = "scorePrediction_chr{:s}_ds{:d}.bedgraph".format(chromname, scoreSize)
-            filename = os.path.join(outputpath, filename)
-            utils.saveInsulationScoreToBedgraph(scoreArray=score, 
-                                                chromSize_matrix=(score.shape[0] + 2*scoreSize)*binSizeInt, 
-                                                binsize=binSizeInt, 
-                                                diamondsize=scoreSize, 
-                                                chromosome=chromname, 
-                                                filename=filename, 
-                                                startbin=0)
-            
-            pass #store bedgraph
+    # if includeScore:
+    #     scorePerChromList = [utils.rebuildScore(pArrayOfTriangles=elem, 
+    #                                             pWindowsize=windowsize,
+    #                                             pFlankingsize=flankingsize,
+    #                                             pScoresize=scoreSize) for elem in matrixPerChromList]
+    #     for chromname, score in zip(chromNameList, scorePerChromList):
+    #         filename = "scorePrediction_chr{:s}_ds{:d}.bedgraph".format(chromname, scoreSize)
+    #         filename = os.path.join(outputpath, filename)
+    #         utils.saveInsulationScoreToBedgraph(scoreArray=score, 
+    #                                             chromSize_matrix=(score.shape[0] + 2*scoreSize)*binSizeInt, 
+    #                                             binsize=binSizeInt, 
+    #                                             diamondsize=scoreSize, 
+    #                                             chromosome=chromname, 
+    #                                             filename=filename, 
+    #                                             startbin=0)
 
     #rebuild the matrices from the overlapping 
     #submatrices for each chromosome
@@ -226,6 +225,18 @@ def prediction(validationmatrix,
                      pOutfile=coolerMatrixName,
                      pChromosomeList=chromNameList,
                      pMetadata=metadata)
+    
+    if includeScore:
+        bedgraphFileName = "scorePrediction_ds{:d}.bedgraph".format(scoreSize)            
+        bedgraphFileName = os.path.join(outputpath, bedgraphFileName)
+        scoreList = [utils.computeScore(pMatrix=i, pDiamondsize=scoreSize) for i in tqdm(matrixPerChromList, desc="computing scores")]
+        chromSizeList = [i.shape[0] * binSizeInt for i in matrixPerChromList]
+        utils.saveInsulationScoreToBedgraph(scoreArrayList=scoreList, 
+                                            chromSizeList=chromSizeList, 
+                                            binsize=binSizeInt,
+                                            diamondsize=scoreSize,
+                                            chromosomeList=chromNameList,
+                                            filename=bedgraphFileName)
 
     #If target matrix provided, compute loss 
     #to assess prediction quality
@@ -252,7 +263,7 @@ def prediction(validationmatrix,
         dictWriter.writeheader()
         dictWriter.writerow(predParamDict)
     
-    for record in tfRecordFilenames:
+    for record in tqdm(tfRecordFilenames, "removing TFRecords"):
         if os.path.exists(record):
             os.remove(record)
 

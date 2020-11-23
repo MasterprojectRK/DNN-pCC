@@ -1117,4 +1117,16 @@ def saveInsulationScoreToBedgraph(scoreArrayList, binsize, diamondsize, chromoso
     with open(filename, "w") as bgf:
             bgf.write("track type=bedGraph\n")
             df.to_csv(bgf, sep="\t", header=False, index=False)
-    
+
+def computeScore(pMatrix, pDiamondsize):
+    if not isinstance(pDiamondsize, int):
+        msg = "Warning: Cannot compute score; size for score computation must be integer"
+        print(msg)
+        return
+    if not isinstance(pMatrix, np.ndarray) or len(pMatrix.shape) != 2 or pMatrix.shape[0] - 2*pDiamondsize <= 1:
+        msg = "Warning: Cannot compute score; matrix wrong format or bad input shape or score size too large"
+        print(msg)
+        return
+    rowStartList, rowEndList, columnStartList, columnEndList = getDiamondIndices(pMatsize=pMatrix.shape[0], pDiamondsize=pDiamondsize)
+    l = [ pMatrix[i:j,k:l] for i,j,k,l in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
+    return np.array([ np.mean(i) for i in l ]).astype("float32")   
