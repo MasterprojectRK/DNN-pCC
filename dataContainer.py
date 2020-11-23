@@ -590,10 +590,10 @@ class DataContainerWithScores(DataContainer):
         matrixName = self.matrixfilepath.lstrip("/").replace("/","-")
         filename = "scores_{:s}_chr{:s}_ds{:d}_{:s}.bedgraph".format(matrixName, str(self.chromosome), self.diamondsize, str(index))
         filename = os.path.join(outpath, filename)
-        utils.saveInsulationScoreToBedgraph(scoreArray=tmp_array,
-                                            chromSize_matrix=chromsize,
+        utils.saveInsulationScoreToBedgraph(scoreArrayList=[tmp_array],
+                                            chromSizeList=[chromsize],
                                             binsize=self.binsize,
                                             diamondsize=self.diamondsize,
-                                            chromosome=self.chromosome,
+                                            chromosomeList=[self.chromosome],
                                             filename=filename,
-                                            startbin=startbin)
+                                            startbinList=[startbin])

@@ -1066,19 +1066,54 @@ def plotInsulationScore(pScoreArray, pFilename, pTitle=None, pStartbin=None, pBi
         ax1.set_title(str(pTitle))
     fig1.savefig(pFilename)
 
-def saveInsulationScoreToBedgraph(scoreArray, chromSize_matrix, binsize, diamondsize, chromosome, filename, startbin=None):
-    posList = [i for i in range(0,chromSize_matrix,binsize)] + [chromSize_matrix]
-    startList = [i for i, j in zip(posList, posList[1:])]
-    endList = [j for i, j in zip(posList, posList[1:])]
-    scores = [0]*diamondsize + list(scoreArray) + [0]*diamondsize
-    df = pd.DataFrame(columns=["chrom", "chromStart", "chromEnd", "dataValue"])
-    df["chromStart"] = startList
-    df["chromEnd"] = endList
-    df["dataValue"] = scores
-    df["chrom"] = chromosome
-    if isinstance(startbin, int):
-        df["chromStart"] += (startbin * binsize)
-        df["chromEnd"] += (startbin * binsize)
+def saveInsulationScoreToBedgraph(scoreArrayList, binsize, diamondsize, chromosomeList, filename, chromSizeList=None, startbinList=None):
+    if not isinstance(scoreArrayList, list) \
+            or not isinstance(chromosomeList, list):
+        msg = "Warning: not saving insulation scores to bedgraph. Wrong input format"
+        print(msg)
+        return
+    if len(scoreArrayList) != len(chromSizeList):
+        msg = "Warning: not saving insulation scores to bedgraph. Inconsistent input lengths"
+        print(msg)
+        return
+    if startbinList is not None and not isinstance(startbinList,list) \
+            or (isinstance(startbinList, list) and len(startbinList) != len(scoreArrayList)):
+        msg = "Warning: not saving insulation scores to bedgraph. Bad startbin list"
+        print(msg)
+        return
+    if chromSizeList is not None and not isinstance(chromSizeList, list) \
+            or (isinstance(chromSizeList, list) and len(chromSizeList) != len(scoreArrayList)):
+        msg = "Warning: not saving insulation scores to bedgraph. Bad chromsize list"
+        print(msg)
+        return
+    if not isinstance(binsize, int) or not isinstance(diamondsize, int):
+        msg = "binsize and diamondsize must be int"
+        print(msg)
+        return
+    if startbinList is None:
+        startbinList = [0]*len(scoreArrayList)
+    if chromSizeList is None:
+        chromSizeList = [(score.shape[0] + 2*diamondsize)*binsize for score in scoreArrayList]
+    dfList = []
+    for chromSize, scoreArray, chromosome, startbin in zip(chromSizeList, scoreArrayList, chromosomeList, startbinList):
+        posList = [i for i in range(0,chromSize,binsize)] + [chromSize]
+        startList = [i for i, j in zip(posList, posList[1:])]
+        endList = [j for i, j in zip(posList, posList[1:])]
+        scores = [0]*diamondsize + list(scoreArray) + [0]*diamondsize
+        if len(scores) != len(startList):
+            msg = "Score Array wrong size"
+            print(msg)
+            continue
+        df = pd.DataFrame(columns=["chrom", "chromStart", "chromEnd", "dataValue"])
+        df["chromStart"] = startList
+        df["chromEnd"] = endList
+        df["dataValue"] = scores
+        df["chrom"] = chromosome
+        if isinstance(startbin, int):
+            df["chromStart"] += (startbin * binsize)
+            df["chromEnd"] += (startbin * binsize)
+        dfList.append(df)
+    df = pd.concat(dfList, ignore_index=True)
     with open(filename, "w") as bgf:
             bgf.write("track type=bedGraph\n")
             df.to_csv(bgf, sep="\t", header=False, index=False)
