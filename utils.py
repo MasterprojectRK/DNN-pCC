@@ -892,7 +892,7 @@ def plotPearsonCorrelationDf(pResultsDfList, pLegendList, pOutfile, pMethod="pea
         return
     
     fig1, ax1 = plt.subplots()
-    ax1.set_ylabel("{:s} correlation".format(pMethod))
+    ax1.set_ylabel("{:s} correlation".format(pMethod[0].upper() + pMethod[1:] ))
     ax1.set_xlabel("Genomic distance / Mbp")
     trainChromSet = set()
     targetChromSet = set()
@@ -931,8 +931,8 @@ def plotPearsonCorrelationDf(pResultsDfList, pLegendList, pOutfile, pMethod="pea
     ax1.set_title(titleStr)
     ax1.set_ylim([0,1])
     ax1.set_xlim([0,maxXVal])
-
-    ax1.legend(frameon=False)
+    ax1.grid(True)
+    ax1.legend(frameon=False, loc="upper right")
     
     if pOutfile is None:
         outfile = "correlation.png"
