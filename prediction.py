@@ -95,11 +95,23 @@ def prediction(validationmatrix,
     except:
         includeScore = False
         scoreSize = None
-    
+    #tvloss was not used previously
+    try:
+        includeTV = trainParamDict["includetv"] == "True"
+    except:
+        includeTV = False    
+
     #load the trained model
     modelLoadParams = {"filepath": trainedmodel}
+    customObjectsDict = dict()
     if includeScore:
-        modelLoadParams["custom_objects"] = {"customLoss": models.customLossWrapper(windowsize,scoreSize)}
+        customObjectsDict["customLoss"] = models.scoreLossWrapper(windowsize,scoreSize)
+    if includeTV:
+        customObjectsDict["TriuReshapeLayer"] = models.TriuReshapeLayer(matsize=windowsize) 
+        customObjectsDict["SymmetricFromTriuLayer"] = models.SymmetricFromTriuLayer()
+        customObjectsDict["tvLoss"] = models.tvLoss
+    if len(customObjectsDict) > 0:
+        modelLoadParams["custom_objects"] = customObjectsDict 
     try:
         trainedModel = tf.keras.models.load_model(**modelLoadParams)
     except Exception as e:
@@ -173,8 +185,8 @@ def prediction(validationmatrix,
 
     #feed the chromatin factors through the trained model
     predMatrixArray = trainedModel.predict(testDs)
-    if includeScore:
-        predMatrixArray = predMatrixArray[0] #the two outputs are identical
+    if includeScore or includeTV:
+        predMatrixArray = predMatrixArray[0] #the first output is the matrix
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
@@ -246,12 +258,22 @@ def prediction(validationmatrix,
                                         compression_type="GZIP")
         evalDs = evalDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         evalDs = evalDs.batch(batchSizeInt)
+        if includeTV and not includeScore:
+            evalDs = evalDs.map( lambda x, y: (x, {"out_matrixData": y["out_matrixData"], "out_tvData": tf.zeros_like(y["out_matrixData"])}) )
+        elif includeTV and includeScore:
+            evalDs = evalDs.map( lambda x, y: (x, {"out_matrixData": y["out_matrixData"], "out_scoreData": y["out_scoreData"], "out_tvData": tf.zeros_like(y["out_matrixData"])}) )
         evalDs = evalDs.prefetch(tf.data.experimental.AUTOTUNE)
         
         loss = trainedModel.evaluate(evalDs)
-        if includeScore:
+        if includeScore and not includeTV:
             msg = "total loss: {:.3f} - matrix loss: {:.3f} - score loss: {:.3f}"
             msg = msg.format(loss[0], loss[1], loss[2])
+        elif includeTV and not includeScore:
+            msg = "total loss: {:.3f} - matrix loss: {:.3f} - TV loss: {:.3f}"
+            msg = msg.format(loss[0], loss[1], loss[2])
+        elif includeScore and includeTV:
+            msg = "total loss {:.3f} - matrix loss: {:.3f} - score loss: {:.3f} - TV loss: {:.3f}"
+            msg = msg.format(loss[0], loss[1], loss[2], loss[3])
         else:
             msg = "loss: {:.3f}".format(loss)
         print(msg)

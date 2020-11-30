@@ -7,7 +7,8 @@ import threading
 import utils
 
 
-def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None, pIncludeScore=False):
+def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, \
+                pFlankingSize=None, pMaxDist=None, pIncludeScore=False, pIncludeTV=False):
     flankingsize = None
     maxdist = None
     if pFlankingSize is None:
@@ -59,7 +60,8 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
                                     pKernelWidthList=kernelSizeList,
                                     pNrNeuronsList=nrNeuronsList,
                                     pDropoutRate=dropoutRate,
-                                    pIncludeScore=pIncludeScore)
+                                    pIncludeScore=pIncludeScore,
+                                    pIncludeTV=pIncludeTV)
     elif sequentialModel == False and pModelTypeStr == "sequence":
         return buildSequenceModel(pWindowSize=pWindowSize,
                                   pFlankingSize=flankingsize,
@@ -72,7 +74,7 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate, pIncludeScore):
+def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate, pIncludeScore, pIncludeTV):
     msg = ""
     if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
         msg += "No. of filters must be a list\n"
@@ -122,8 +124,15 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
     x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
     model = Model(inputs=inputs, outputs=x)
     if pIncludeScore == True:
+        #create a pass-through layer from which scores are computed
         y = Activation(activation="linear", name="out_scoreData")(x)
-        model = Model(inputs=inputs, outputs=[x, y])
+        model = Model(inputs=inputs, outputs=model.outputs + [y])
+    if pIncludeTV == True:
+        #reshape the matrices into images such that tv loss can be computed
+        y = TriuReshapeLayer(pWindowSize, name="triu_reshape1")(x)
+        y = SymmetricFromTriuLayer(name="symmetric_reshape1")(y)
+        y = tf.keras.layers.Lambda(lambda x: tf.expand_dims(x, -1), name="out_tvData")(y)
+        model = Model(inputs=inputs, outputs=model.outputs + [y])
     return model
 
 def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols, pDropoutRate):
@@ -424,7 +433,7 @@ class multiInputGenerator(tf.keras.utils.Sequence):
                 retArr = oldSeqDict[requiredSeqIdentifier][startInd:stopInd]
         return retArr
 
-class CustomReshapeLayer(tf.keras.layers.Layer):
+class TriuReshapeLayer(tf.keras.layers.Layer):
     '''
     reshape a 1D tensor such that it represents 
     the upper triangular part of a square 2D matrix with shape (matsize, matsize)
@@ -434,7 +443,7 @@ class CustomReshapeLayer(tf.keras.layers.Layer):
                        [0,0,6]]
     '''
     def __init__(self, matsize, **kwargs):
-        super(CustomReshapeLayer, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.matsize = matsize
         self.triu_indices = [ [x,y] for x,y in zip(np.triu_indices(self.matsize)[0], np.triu_indices(self.matsize)[1]) ]
 
@@ -446,6 +455,9 @@ class CustomReshapeLayer(tf.keras.layers.Layer):
                                         values=inputVec, 
                                         dense_shape=[self.matsize, self.matsize] )
         return tf.sparse.to_dense(sparseTriuTens)
+    
+    def get_config(self):
+        return {"matsize": self.matsize}
 
 class TadInsulationScoreLayer(tf.keras.layers.Layer):
     '''
@@ -475,13 +487,41 @@ class TadInsulationScoreLayer(tf.keras.layers.Layer):
         l = [ tf.reduce_mean(i) for i in l ]
         return tf.stack(l)
 
-def customLossWrapper(pMatrixsize, pDiamondsize):
+class SymmetricFromTriuLayer(tf.keras.layers.Layer):
+    '''
+    make upper triangular tensors symmetric
+    example:
+    [[1,2,3],
+     [0,4,5],
+     [0,0,6]] 
+    becomes:
+    [[1,2,3],
+     [2,4,5],
+     [3,5,6]] 
+    '''
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, inputs):
+        return tf.map_fn(self.makeSymmetric, inputs, parallel_iterations=20, swap_memory=True)
+
+    def makeSymmetric(self, inputMat):
+        outMat = inputMat + tf.transpose(inputMat)
+        #the diagonal is doubled when adding the transpose, so subtract half of it
+        outMat -= 0.5 * tf.linalg.band_part(outMat, 0, 0)
+        return outMat
+
+def scoreLossWrapper(pMatrixsize, pDiamondsize):
     def customLoss(y_true, y_pred):
         #compute the score from the predicted (flattened) upper triangular matrix
-        predScore = CustomReshapeLayer(matsize=pMatrixsize)(y_pred)
+        predScore = TriuReshapeLayer(matsize=pMatrixsize)(y_pred)
         predScore = TadInsulationScoreLayer(matsize=pMatrixsize,diamondsize=pDiamondsize)(predScore)
         #compute mean squared error for TAD insulation score
         predLoss = tf.square(y_true - predScore)
         predLoss = tf.reduce_mean(predLoss)
         return predLoss
     return customLoss
+
+@tf.function
+def tvLoss(y_true, y_pred):
+    return tf.reduce_sum( tf.image.total_variation(y_pred) )

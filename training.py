@@ -96,6 +96,13 @@ tf.random.set_seed(35)
 @click.option("--scoreSize", "-ssz", required=False,
                 type=click.IntRange(min=1.0), 
                 help="size for computation of insulation score. Must be (much) smaller than windowsize")
+@click.option("--includeTV", "-itv", required=False,
+                type=bool, default=True, show_default=True,
+                help="include total variation loss")
+@click.option("--tvWeight", "-tvw", required=False,
+                type=click.FloatRange(min=1e-12, max=1.0),
+                default=1e-3, show_default=True,
+                help="weight for total variation loss; only relevant, if -tvw is True")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
                 default="SGD", show_default=True,
@@ -143,6 +150,8 @@ def training(trainmatrices,
             includescore,
             scoreweight,
             scoresize,
+            includetv,
+            tvweight,
             optimizer,
             loss,
             earlystopping,
@@ -287,7 +296,8 @@ def training(trainmatrices,
                                     pNrSymbols=nr_symbols,
                                     pFlankingSize=flankingsize,
                                     pMaxDist=maxdist,
-                                    pIncludeScore=includescore)
+                                    pIncludeScore=includescore,
+                                    pIncludeTV=includetv)
     #define optimizer
     kerasOptimizer = getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
     
@@ -296,7 +306,9 @@ def training(trainmatrices,
                                         includeScore=includescore, 
                                         windowsize=windowsize, 
                                         diamondsize=scoresize, 
-                                        scoreWeight=scoreweight)
+                                        scoreWeight=scoreweight,
+                                        includeTV=includetv,
+                                        tvWeight=tvweight)
 
     #compile the model
     model.compile(optimizer=kerasOptimizer, 
@@ -345,6 +357,11 @@ def training(trainmatrices,
     trainDs = trainDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.batch(batchsize)
+    #ensure there is some "target" input to out_tvData, although it is not used
+    if includetv and not includescore:
+        trainDs = trainDs.map( lambda x, y: (x, {"out_matrixData": y["out_matrixData"], "out_tvData": tf.zeros_like(y["out_matrixData"])}) )
+    elif includetv and includescore:
+        trainDs = trainDs.map( lambda x, y: (x, {"out_matrixData": y["out_matrixData"], "out_scoreData": y["out_scoreData"], "out_tvData": tf.zeros_like(y["out_matrixData"])}) )
     trainDs = trainDs.repeat(numberepochs)
     trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
     validationDs = tf.data.TFRecordDataset(validationdataRecords, 
@@ -352,6 +369,11 @@ def training(trainmatrices,
                                             compression_type="GZIP")
     validationDs = validationDs.map(lambda x: records.parse_function(x, storedFeaturesDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
     validationDs = validationDs.batch(batchsize)
+    #ensure there is some "target" input to out_tvData, although it is not used
+    if includetv and not includescore:
+        validationDs = validationDs.map( lambda x, y: (x, {"out_matrixData": y["out_matrixData"], "out_tvData": tf.zeros_like(y["out_matrixData"])}) )
+    elif includetv and includescore:
+        validationDs = validationDs.map( lambda x, y: (x, {"out_matrixData": y["out_matrixData"], "out_scoreData": y["out_scoreData"], "out_tvData": tf.zeros_like(y["out_matrixData"])}) )
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
     #train the neural network
@@ -400,12 +422,16 @@ def getOptimizer(pOptimizerString, pLearningrate):
         raise NotImplementedError("unknown optimizer")
     return kerasOptimizer
 
-def getLosses(pLossStr, includeScore=False, windowsize=None, diamondsize=None, scoreWeight=None):
+def getLosses(pLossStr, \
+              includeScore=False, windowsize=None, diamondsize=None, scoreWeight=None,\
+              includeTV=False, tvWeight=None ):
     if includeScore and (windowsize is None or diamondsize is None or scoreWeight is None):
         msg = "must set windowsize, diamondsize and scoreWeight when includeScore is True"
         raise ValueError(msg)
+    if includeTV and tvWeight is None:
+        msg = "must set tvWeigth when includeTV is True"
+        raise ValueError(msg)
     loss_fn = None
-    loss_weights = None
     if pLossStr == "MSE":
         loss_fn = tf.keras.losses.MeanSquaredError()
     elif pLossStr.startswith("Huber"):
@@ -424,12 +450,20 @@ def getLosses(pLossStr, includeScore=False, windowsize=None, diamondsize=None, s
         loss_fn = tf.keras.losses.CosineSimilarity()
     else:
         raise NotImplementedError("unknown loss function")
-    #include second loss function, if model includes insulation score
+    lossDict = {"out_matrixData": loss_fn}
+    weightDict = {"out_matrixData" : 1.0}
+    #include insulation score loss, if requested
     if includeScore:
-        loss_fn = {"out_matrixData": loss_fn,
-                   "out_scoreData": models.customLossWrapper(windowsize, diamondsize)}
-        loss_weights = {"out_matrixData": 1.0, "out_scoreData": scoreWeight}
-    return  loss_fn, loss_weights
+        lossDict["out_scoreData"] = models.scoreLossWrapper(windowsize, diamondsize)
+        weightDict["out_scoreData"] = scoreWeight
+    #include TV loss, if requested
+    if includeTV:
+        lossDict["out_tvData"] = models.tvLoss
+        weightDict["out_tvData"] = tvWeight
+    if len(lossDict) > 1:
+        return lossDict, weightDict
+    else:
+        return  loss_fn, None
 
 
 if __name__ == "__main__":
