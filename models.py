@@ -511,6 +511,27 @@ class SymmetricFromTriuLayer(tf.keras.layers.Layer):
         outMat -= 0.5 * tf.linalg.band_part(outMat, 0, 0)
         return outMat
 
+class ScalingLayer(tf.keras.layers.Layer):
+    def __init__(self, maxval=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.maxval = maxval
+
+    def call(self, inputs):
+        return tf.map_fn(self.scale, inputs, parallel_iterations=20, swap_memory=True)
+
+    def scale(self, inputs):
+        minTens = tf.reduce_min(inputs)
+        maxTens = tf.reduce_max(inputs)
+        enumTens = tf.subtract(inputs, minTens)
+        denomTens = tf.subtract(maxTens, minTens)
+        def d1(): return tf.math.divide(inputs, maxTens) * self.maxval
+        def d2(): return tf.math.divide(enumTens, denomTens) * self.maxval
+        retTens = tf.cond(tf.math.equal(minTens, maxTens), d1, d2)
+        return retTens
+
+    def get_config(self):
+        return {"maxval": self.maxval}
+
 def scoreLossWrapper(pMatrixsize, pDiamondsize):
     def customLoss(y_true, y_pred):
         #compute the score from the predicted (flattened) upper triangular matrix
