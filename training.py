@@ -370,6 +370,15 @@ def training(trainmatrices,
     losssss = loss_fn(tds1_targs, outs1)
     weights_before = model.layers[1].weights[0].numpy()
 
+    percLossMod = models.getPerceptionModel(windowsize)
+    for x, y in tqdm(trainDs.take(20), desc="Testhaha", total=20):
+        trainStep(model, x, y, kerasOptimizer, percLossMod)
+    
+    weights_after = model.layers[1].weights[0].numpy()
+
+    print("weight sum before", np.sum(weights_before))
+    print("weight sum after", np.sum(weights_after))
+
     #train the neural network
     history = model.fit(trainDs,
               epochs= numberepochs,
@@ -395,6 +404,32 @@ def training(trainmatrices,
         for record in tqdm(traindataRecords + validationdataRecords, desc="Deleting TFRecord files"):
             if os.path.exists(record):
                 os.remove(record)
+
+def trainStep(creationModel, factorInputBatch, targetInputBatch, optimizer, perceptionLossModel=None):
+    with tf.GradientTape() as tape:
+        loss = 0
+        predVec = creationModel(factorInputBatch)
+        trueVec = targetInputBatch['out_matrixData']
+        #loss += tf.reduce_mean( tf.square(trueVec - predVec)  )
+        y_true_grayscale = models.ScalingLayer(0.999)(trueVec) #value range 0..0.999
+        y_true_grayscale = models.CustomReshapeLayer(80)(y_true_grayscale) #2D embedding as upper triangle
+        y_true_grayscale = models.SymmetricFromTriuLayer()(y_true_grayscale) #symmetric matrix
+        y_true_grayscale = tf.expand_dims(y_true_grayscale, axis=-1) #make it an image with channels last, i.e. shape = (batchsize, matsize, matsize, 1)      
+        y_true_rgb = tf.image.grayscale_to_rgb(y_true_grayscale)
+        
+        y_pred_grayscale = models.ScalingLayer(0.999)(predVec) #value range 0..0.999
+        y_pred_grayscale = models.CustomReshapeLayer(80)(y_pred_grayscale) #2D embedding as upper triangle
+        y_pred_grayscale = models.SymmetricFromTriuLayer()(y_pred_grayscale) #symmetric matrix
+        y_pred_grayscale = tf.expand_dims(y_pred_grayscale, axis=-1)
+        y_pred_rgb = tf.image.grayscale_to_rgb(y_pred_grayscale)
+
+        predActivations = perceptionLossModel(y_pred_rgb)
+        trueActivations = perceptionLossModel(y_true_rgb)
+        loss += tf.reduce_mean( tf.square(trueActivations - predActivations) )
+
+    gradients = tape.gradient(loss, creationModel.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, creationModel.trainable_variables))
+
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
     modeltypeStr = pModelTypeStr

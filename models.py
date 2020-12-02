@@ -415,3 +415,14 @@ def lossFunction(pixelLoss="MSE", pixelWeight=1.0,
                 loss += perceptionLoss * perceptionWeight
         return loss
     return loss_function
+
+
+def getPerceptionModel(windowsize):
+    model = vgg16.VGG16(weights="imagenet", include_top=False, input_shape=(windowsize, windowsize, 3))  
+    model.trainable = False
+    structureOutput = model.get_layer("block4_conv3").output
+    perceptionModel = Model(inputs=model.inputs, outputs=structureOutput)
+    perceptionModel.trainable = False
+    for layer in perceptionModel.layers:
+        layer.trainable = False
+    return perceptionModel
