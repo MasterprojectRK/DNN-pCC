@@ -295,39 +295,21 @@ def training(trainmatrices,
     #define optimizer
     kerasOptimizer = models.getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
     
-    #define loss(es)
-    loss_fn = models.lossFunction(pixelLoss=loss,
-                                  pixelWeight=0.,
-                                  windowsize=windowsize,
-                                  scoreWeight=scoreweight,
-                                  diamondsize=scoresize,
-                                  tvWeight=tvweight,
-                                  msSSIMweight=structureweight,
-                                  perceptionWeight=perceptionweight)
-
-    #compile the model
-    model.compile(optimizer=kerasOptimizer, 
-                 loss=loss_fn)
+    #build and print the model
+    model.build(input_shape = (windowsize + 2*flankingsize, nr_factors))
     model.summary()
 
-    #callbacks to check the progress etc.
-    tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = int(np.ceil(nr_trainingSamples / batchsize) * savefreq)
-    checkpointFilename = os.path.join(outputpath, "checkpoint_{epoch:05d}.h5")
-    checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
-                                                        monitor="val_loss",
-                                                        save_freq=saveFreqInt)
-    earlyStoppingCallback = None
-    if earlystopping is not None:
-        earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
-                                                            patience=earlystopping,
-                                                            min_delta=0.001,
-                                                            restore_best_weights=True)
-    callback_fns = [tensorboardCallback,
-                checkpointCallback]
-    if earlystopping is not None:
-        callback_fns.append(earlyStoppingCallback)
-    
+    #writers for tensorboard
+    traindatapath = os.path.join(outputpath, "train/")
+    validationDataPath = os.path.join(outputpath, "validation/")
+    if os.path.exists(traindatapath):
+        [os.remove(os.path.join(traindatapath, f)) for f in os.listdir(traindatapath)] 
+    if os.path.exists(validationDataPath):
+        [os.remove(os.path.join(validationDataPath, f)) for f in os.listdir(validationDataPath)]
+    summary_writer_train = tf.summary.create_file_writer(traindatapath)
+    summary_writer_val = tf.summary.create_file_writer(validationDataPath)
+
+     
 
     #save the training parameters to a file before starting to train
     #(allows recovering the parameters even if training is aborted
@@ -351,85 +333,120 @@ def training(trainmatrices,
                                         compression_type="GZIP")
     trainDs = trainDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
-    trainDs = trainDs.batch(batchsize)
-    trainDs = trainDs.repeat(numberepochs)
+    trainDs = trainDs.batch(batchsize, drop_remainder=True)
     trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
     validationDs = tf.data.TFRecordDataset(validationdataRecords, 
                                             num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                             compression_type="GZIP")
     validationDs = validationDs.map(lambda x: records.parse_function(x, storedFeaturesDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
     validationDs = validationDs.batch(batchsize)
-    validationDs = validationDs.take(1)
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
-    tds1 = trainDs.take(1)
-    tds1_train = list(tds1.map(lambda x,y: x).as_numpy_iterator())
-    tds1_targs = list(tds1.map(lambda x,y: y).as_numpy_iterator())
-    tds1_targs = tds1_targs[0]["out_matrixData"]
-    outs1 = model(tds1_train).numpy()
-    losssss = loss_fn(tds1_targs, outs1)
     weights_before = model.layers[1].weights[0].numpy()
 
     percLossMod = models.getPerceptionModel(windowsize)
-    for x, y in tqdm(trainDs.take(20), desc="Testhaha", total=20):
-        trainStep(model, x, y, kerasOptimizer, percLossMod)
-    
-    weights_after = model.layers[1].weights[0].numpy()
+    grayscaleMod = models.getGrayscaleConversionModel(scalingFactor=0.999, windowsize=windowsize)
+    trainLossList_epochs = [] #loss for each epoch
+    valLossList_epochs = []
+    for epoch in range(numberepochs):
+        pbar_batch = tqdm(trainDs, total=int(np.floor(nr_trainingSamples / batchsize)))
+        trainLossList_batches = [] #loss for each batch
+        for x, y in pbar_batch:
+            lossVal = trainStep(creationModel=model, 
+                                grayscaleConversionModel=grayscaleMod, 
+                                factorInputBatch=x, 
+                                targetInputBatch=y, 
+                                optimizer=kerasOptimizer, 
+                                perceptionLossModel=percLossMod,
+                                pixelLossWeight=1.0, 
+                                ssimWeight=structureweight, 
+                                tvWeight=tvweight, 
+                                perceptionWeight=perceptionweight,
+                                scoreWeight=scoreweight
+                                )
+            trainLossList_batches.append(lossVal)
+            pbar_batch.set_postfix( {"loss": "{:.4f}".format(lossVal)} )
+        trainLossList_epochs.append(np.mean(trainLossList_batches))
+        trainLossList_batches = []
+        with summary_writer_train.as_default(): #pylint: disable=not-context-manager
+            tf.summary.scalar('train_loss', trainLossList_epochs[epoch], step=epoch+1)
+        if epoch % savefreq == 0:
+            checkpointFilename = "checkpoint_{:05d}.h5".format(epoch)
+            checkpointFilename = os.path.join(outputpath, checkpointFilename)
+            model.save(filepath=checkpointFilename,save_format="h5")
+        valLossList_batches = []
+        for x,y in validationDs:
+            val_loss = validationStep(creationModel=model, factorInputBatch=x, targetInputBatch=y, pixelLossWeight=1.0 )
+            valLossList_batches.append(val_loss)
+        valLossList_epochs.append(np.mean(valLossList_batches))
+        valLossList_batches = []
+        with summary_writer_val.as_default(): #pylint: disable=not-context-manager
+            tf.summary.scalar('validation_loss', valLossList_epochs[epoch], step=epoch+1)
 
+    weights_after = model.layers[1].weights[0].numpy()
     print("weight sum before", np.sum(weights_before))
     print("weight sum after", np.sum(weights_after))
-
-    #train the neural network
-    history = model.fit(trainDs,
-              epochs= numberepochs,
-              validation_data= validationDs,
-              callbacks= callback_fns,
-              steps_per_epoch= int(np.ceil(nr_trainingSamples / batchsize))
-            )
 
     #store the trained network
     model.save(filepath=modelfilepath,save_format="h5")
-    weights_after = model.layers[1].weights[0].numpy()
-
-    print("weight sum before", np.sum(weights_before))
-    print("weight sum after", np.sum(weights_after))
 
     #plot train- and validation loss over epochs
     lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
     lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
-    utils.plotHistory(history, lossPlotFilename)
+    utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
+                    pNameList=["train", "validation"],
+                    pFilename=lossPlotFilename)
 
     #delete train- and validation records, if debugstate not set
     if debugstate is None or debugstate=="Figures":
         for record in tqdm(traindataRecords + validationdataRecords, desc="Deleting TFRecord files"):
             if os.path.exists(record):
                 os.remove(record)
-
-def trainStep(creationModel, factorInputBatch, targetInputBatch, optimizer, perceptionLossModel=None):
+@tf.function
+def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None):
     with tf.GradientTape() as tape:
-        loss = 0
+        loss = tf.zeros(shape=())
         predVec = creationModel(factorInputBatch)
         trueVec = targetInputBatch['out_matrixData']
-        #loss += tf.reduce_mean( tf.square(trueVec - predVec)  )
-        y_true_grayscale = models.ScalingLayer(0.999)(trueVec) #value range 0..0.999
-        y_true_grayscale = models.CustomReshapeLayer(80)(y_true_grayscale) #2D embedding as upper triangle
-        y_true_grayscale = models.SymmetricFromTriuLayer()(y_true_grayscale) #symmetric matrix
-        y_true_grayscale = tf.expand_dims(y_true_grayscale, axis=-1) #make it an image with channels last, i.e. shape = (batchsize, matsize, matsize, 1)      
-        y_true_rgb = tf.image.grayscale_to_rgb(y_true_grayscale)
-        
-        y_pred_grayscale = models.ScalingLayer(0.999)(predVec) #value range 0..0.999
-        y_pred_grayscale = models.CustomReshapeLayer(80)(y_pred_grayscale) #2D embedding as upper triangle
-        y_pred_grayscale = models.SymmetricFromTriuLayer()(y_pred_grayscale) #symmetric matrix
-        y_pred_grayscale = tf.expand_dims(y_pred_grayscale, axis=-1)
-        y_pred_rgb = tf.image.grayscale_to_rgb(y_pred_grayscale)
-
-        predActivations = perceptionLossModel(y_pred_rgb)
-        trueActivations = perceptionLossModel(y_true_rgb)
-        loss += tf.reduce_mean( tf.square(trueActivations - predActivations) )
-
+        #per-pixel MSE
+        if pixelLossWeight > 0.0:
+            loss += tf.reduce_mean( tf.square(trueVec - predVec)  ) * pixelLossWeight
+        #convert vector batches to grayscale image batches
+        y_true_grayscale = grayscaleConversionModel(trueVec)     
+        y_pred_grayscale = grayscaleConversionModel(predVec)
+        #perception loss based on pre-trained network
+        if perceptionWeight > 0.0:
+            y_true_rgb = tf.image.grayscale_to_rgb(y_true_grayscale)
+            y_pred_rgb = tf.image.grayscale_to_rgb(y_pred_grayscale)
+            predActivations = perceptionLossModel(y_pred_rgb)
+            trueActivations = perceptionLossModel(y_true_rgb)
+            loss += tf.reduce_mean( tf.square(trueActivations - predActivations) ) * perceptionWeight
+        #Total Variation loss
+        if tvWeight > 0.0:
+            tvLoss = tf.reduce_sum(tf.image.total_variation(y_pred_grayscale)) 
+            loss += tvLoss * tvWeight
+        #multiscale structural similarity loss (MS-SSIM)
+        if ssimWeight > 0.0:
+            ssim = tf.image.ssim(y_true_grayscale, y_pred_grayscale, 1., filter_size=5)
+            ssimLoss = 1.0 - tf.reduce_mean(ssim)
+            loss += ssimLoss * ssimWeight
+        #loss based on TAD insulation score
+        if scoreWeight > 0.0:
+            predScore = models.TadInsulationScoreLayer(80,15)(y_pred_grayscale)
+            trueScore = models.TadInsulationScoreLayer(80,15)(y_true_grayscale)
+            scoreLoss = tf.reduce_mean(tf.square(trueScore - predScore))
+            loss += scoreLoss * scoreWeight
     gradients = tape.gradient(loss, creationModel.trainable_variables)
     optimizer.apply_gradients(zip(gradients, creationModel.trainable_variables))
+    return loss
 
+@tf.function
+def validationStep(creationModel, factorInputBatch, targetInputBatch, pixelLossWeight=1.0):
+    val_loss = tf.zeros(shape=())
+    predVec = creationModel(factorInputBatch)
+    trueVec = targetInputBatch['out_matrixData']
+    val_loss += tf.reduce_mean( tf.square(trueVec - predVec) * pixelLossWeight)
+    return val_loss
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
     modeltypeStr = pModelTypeStr

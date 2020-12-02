@@ -147,13 +147,13 @@ def plotMatrix(pMatrix, pFilename, pTitle):
     fig1.colorbar(cs)
     fig1.savefig(pFilename)
 
-def plotHistory(pKerasHistoryObject, pFilename):
+def plotLoss(pLossValueLists, pNameList, pFilename):
     #plot loss and validation loss over epoch numbers
     fig1, ax1 = plt.subplots(figsize=(6,4.5))
-    nr_epochs = len(pKerasHistoryObject.history['loss'])
+    nr_epochs = len(pLossValueLists[0])
     x_vals = np.arange(nr_epochs) + 1
-    ax1.plot(x_vals, pKerasHistoryObject.history['loss'])
-    ax1.plot(x_vals, pKerasHistoryObject.history['val_loss'])
+    for lossVals, _ in zip(pLossValueLists, pNameList):
+        ax1.plot(x_vals, lossVals)
     ax1.set_title('model loss')
     ax1.set_ylabel('loss')
     ax1.set_xlabel('epoch')
@@ -177,7 +177,7 @@ def plotHistory(pKerasHistoryObject, pFilename):
         locVal = 1000
     ax1.xaxis.set_major_locator(MultipleLocator(locVal))
     ax1.grid(True, which="both")
-    ax1.legend(['train', 'val'], loc='upper left')
+    ax1.legend(pNameList, loc='upper left')
     fig1.savefig(pFilename)
 
 def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=None, pStepsize=1):
