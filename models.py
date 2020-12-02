@@ -426,3 +426,15 @@ def getPerceptionModel(windowsize):
     for layer in perceptionModel.layers:
         layer.trainable = False
     return perceptionModel
+
+def getGrayscaleConversionModel(scalingFactor, windowsize):
+    inputs = Input(shape=(int(windowsize * (windowsize + 1) / 2 )) )
+    x = ScalingLayer(maxval=scalingFactor)(inputs)
+    x = CustomReshapeLayer(matsize=windowsize)(x)
+    x = SymmetricFromTriuLayer()(x)
+    x = tf.keras.layers.Lambda(lambda z: tf.expand_dims(z, axis=-1))(x)
+    model = Model(inputs=inputs, outputs=x)
+    model.trainable = False
+    for layer in model.layers:
+        layer.trainable = False
+    return model
