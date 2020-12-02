@@ -2,12 +2,13 @@ import tensorflow as tf
 from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D,Activation
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras import Input
+from tensorflow.keras.applications import vgg16
 import numpy as np
 import threading 
 import utils
 
 
-def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None, pIncludeScore=False):
+def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None):
     flankingsize = None
     maxdist = None
     if pFlankingSize is None:
@@ -58,8 +59,7 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
                                     pNrFiltersList=nrFiltersList,
                                     pKernelWidthList=kernelSizeList,
                                     pNrNeuronsList=nrNeuronsList,
-                                    pDropoutRate=dropoutRate,
-                                    pIncludeScore=pIncludeScore)
+                                    pDropoutRate=dropoutRate)
     elif sequentialModel == False and pModelTypeStr == "sequence":
         return buildSequenceModel(pWindowSize=pWindowSize,
                                   pFlankingSize=flankingsize,
@@ -72,7 +72,7 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate, pIncludeScore):
+def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate):
     msg = ""
     if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
         msg += "No. of filters must be a list\n"
@@ -121,9 +121,6 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFi
     nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
     x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
     model = Model(inputs=inputs, outputs=x)
-    if pIncludeScore == True:
-        y = Activation(activation="linear", name="out_scoreData")(x)
-        model = Model(inputs=inputs, outputs=[x, y])
     return model
 
 def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols, pDropoutRate):
@@ -192,238 +189,6 @@ def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSiz
     finalModel = Model(inputs=[model1.input, model2.input], outputs=x)
     return finalModel
 
-
-class multiInputGenerator(tf.keras.utils.Sequence):
-    def __init__(self, matrixDict, factorDict, 
-                 batchsize, windowsize, flankingsize=None,
-                 binsize=None, shuffle=True,
-                 maxdist=None):
-        self.matrixDict = matrixDict
-        self.factorDict = factorDict
-        self.batchsize = batchsize
-        #the size of the submatrix
-        self.windowsize = windowsize 
-        #the size of the flanking regions left/right of the submatrix
-        if flankingsize is not None:
-            self.flankingsize = flankingsize
-        else:
-            self.flankingsize = self.windowsize
-        if maxdist is not None:
-            self.maxdist = min(maxdist, windowsize)
-        else:
-            self.maxdist = self.windowsize
-        self.matrixSize = int(self.windowsize * (self.windowsize + 1) / 2)
-        if self.maxdist is not None:
-            self.matrixSize -= int( (self.windowsize - self.maxdist)*(self.windowsize - self.maxdist + 1) / 2 )
-        self.shuffle = shuffle
-        self.nr_factors = max([self.factorDict[folder]["nr_factors"] for folder in self.factorDict])
-        #get the chrom names
-        self.chromNames = []
-        for folder in self.factorDict:
-            self.chromNames.extend([name for name in self.factorDict[folder]["data"]])
-        self.chromNames = sorted(list(set(self.chromNames)))     
-        #index the samples provided in the dicts
-        self.localIndices, self.globalIndex, self.globalIndexMapping = self.__buildIndex()
-        #disable shuffling when no target data is available (i.e. for predictions)
-        if self.matrixDict is None: 
-            self.shuffle = False
-        #list with DNA sequences per chromosome, two entries
-        #the idea is that all threads are usually working on the current entry
-        #the first thread to require more data will load it to the second entry
-        self._dnaSequenceLock = threading.Lock()
-        self.currentSequenceIndex = 0 #to be updated only with lock, 0 or 1
-        self.dnaSequenceList = [dict(), dict()] #to be updated only with lock
-        self.sequencePresent = False
-        for folder in self.factorDict:
-            if "seqFile" in self.factorDict[folder]:
-                self.sequencePresent = True
-                break
-        self.sequenceSymbolSet = None
-        self.binsize = binsize
-        if self.sequencePresent:
-            tmpSymbolsList = [factorDict[folder]["seqSymbols"] for folder in factorDict]
-            self.sequenceSymbolSet = set([item for sublist in tmpSymbolsList for item in sublist])
-        #initial shuffling of local indices
-        self.on_epoch_end()
-
-    def __len__(self):
-        #some batches will come from two matrices/folders or two chromosomes
-        #the last batch will have a different size
-        return int(np.ceil(len(self.globalIndex) / self.batchsize))
-
-    def __getitem__(self, index):
-        indices = self.globalIndex[index*self.batchsize : (index+1)*self.batchsize]
-        return self.__generateData(indices)
-
-    def __generateData(self, globalIndices):
-        #initialize the return arrays
-        #len(globalIndices) is generally equal to batchsize
-        #but the last batch may be smaller
-        chromatinFactorArray = np.empty((len(globalIndices), self.windowsize + 2*self.flankingsize, self.nr_factors))
-        matrixArray = None
-        if self.matrixDict is not None:
-            matrixArray = np.empty((len(globalIndices), self.matrixSize))
-        sequenceArray = None
-        if self.sequencePresent:
-            sequenceArray = np.empty((len(globalIndices), int(self.windowsize * self.binsize), len(self.sequenceSymbolSet)), dtype=np.uint8)
-        #find the correct global -> local mapping for of the first and last global index in the batch
-        indBreakpoints = [bp for bp in self.globalIndexMapping]
-        lowerMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[0])
-        upperMapInd = next(ind for ind,val in enumerate(indBreakpoints) if val > globalIndices[-1])
-        if lowerMapInd == upperMapInd:
-            #all global Indices belong to samples from the same chrom / folder
-            localAccessInds = globalIndices.copy() #avoid side effects on globalIndices
-            if lowerMapInd > 0:
-                localAccessInds -= indBreakpoints[lowerMapInd - 1]
-            currentChrom = self.globalIndexMapping[indBreakpoints[lowerMapInd]][0]
-            currentFolder = self.globalIndexMapping[indBreakpoints[lowerMapInd]][1]
-            localIndices = self.localIndices[currentChrom][currentFolder][localAccessInds]
-            #now get the data
-            for b, ind in enumerate(localIndices):
-                chromatinFactorArray[b] = self.__getFactorData(currentFolder,currentChrom,ind)
-                if matrixArray is not None:
-                    mName = self.factorDict[currentFolder]["matrixName"]
-                    matrixArray[b] = self.__getMatrixData(mName,currentChrom,ind)
-                if self.sequencePresent == True:
-                    sequenceArray[b] = self.__checkGetDNAsequence(currentFolder, currentChrom, ind)
-        else:
-            #some samples are from one chrom/folder pair and the others from another one 
-            #split the access indices into lower and upper part
-            indSplit = next(ind for ind,val in enumerate(globalIndices) if val > indBreakpoints[lowerMapInd])
-            localAccessIndsLower = globalIndices.copy()[:indSplit-1] #avoid side effects on globalIndices
-            if lowerMapInd > 0:
-                localAccessIndsLower -= indBreakpoints[lowerMapInd - 1]
-            localAccessIndsUpper = globalIndices[indSplit-1:] - indBreakpoints[upperMapInd - 1]
-            currentChromLower = self.globalIndexMapping[indBreakpoints[lowerMapInd]][0]
-            currentFolderLower = self.globalIndexMapping[indBreakpoints[lowerMapInd]][1]
-            currentChromUpper = self.globalIndexMapping[indBreakpoints[upperMapInd]][0]
-            currentFolderUpper = self.globalIndexMapping[indBreakpoints[upperMapInd]][1]
-            #print("\nchrom lower", currentChromLower, "chrom upper", currentChromUpper)
-            #print("\nfolder lower", currentFolderLower, "folder upper", currentFolderUpper)
-            #print("\nsplit lower", localAccessIndsLower, "split upper", localAccessIndsUpper)
-            #print("gbi", globalIndices)
-            localIndicesLower = self.localIndices[currentChromLower][currentFolderLower][localAccessIndsLower]
-            localIndicesUpper = self.localIndices[currentChromUpper][currentFolderUpper][localAccessIndsUpper]
-            #now load the data
-            for b, ind in enumerate(localIndicesLower):
-                chromatinFactorArray[b] = self.__getFactorData(currentFolderLower,currentChromLower,ind)
-                if matrixArray is not None:
-                    mName = self.factorDict[currentFolderLower]["matrixName"]
-                    matrixArray[b] = self.__getMatrixData(mName,currentChromLower, ind)
-                if self.sequencePresent == True:
-                    sequenceArray[b] = self.__checkGetDNAsequence(currentFolderLower, currentChromLower, ind)
-            indOffset = len(localIndicesLower)
-            for b, ind in enumerate(localIndicesUpper):
-                chromatinFactorArray[b+indOffset] = self.__getFactorData(currentFolderUpper, currentChromUpper, ind)
-                if matrixArray is not None:
-                    mName = self.factorDict[currentFolderUpper]["matrixName"]
-                    matrixArray[b+indOffset] = self.__getMatrixData(mName,currentChromUpper, ind)
-                if self.sequencePresent == True:
-                    sequenceArray[b+indOffset] = self.__checkGetDNAsequence(currentFolderUpper, currentChromUpper, ind)
-        if matrixArray is not None:
-            if self.sequencePresent == True:
-                return [chromatinFactorArray, sequenceArray], matrixArray
-            else:
-                return [chromatinFactorArray], matrixArray
-        else:
-            if self.sequencePresent == True:
-                return [chromatinFactorArray, sequenceArray]
-            else:
-                return chromatinFactorArray
-
-    def on_epoch_end(self):
-        if self.shuffle == True:
-            #permutation of local indices
-            for chromname in self.chromNames:
-                for folder in self.localIndices[chromname]:
-                    np.random.shuffle(self.localIndices[chromname][folder])
-            
-
-    
-    def __buildIndex(self):
-        #indexing of samples
-        #the idea is that data is provided chromosome-wise, then folder/matrix-wise
-        #i.e. chr1 - folder1, folder2,... chr2, folder 1, folder 2
-        #because the matrices and sequences are structured in chromosomes
-        #each folder/matrix - chromosome pair has its own local index
-        #this allows keeping the global index linearly increasing while shuffling local indices.
-        #There is a mapping from the global index which
-        #tells us from which folder/matrix - chromosome pair a sample has to be taken from
-        #e.g. global sample number n is to be taken from folder/matrix k, chromosome c
-        localIndices = dict() #for each chromosome/folder pair
-        globalIndexMapping = dict() #mapping from global indices to local indices (chromosome/folder pairs)
-        globalIndex = 0
-        for chromName in self.chromNames:
-            folderIndDict = dict()
-            for folder in self.factorDict:
-                actDataLength = self.factorDict[folder]["data"][chromName].shape[0]
-                nr_samples = actDataLength - (self.windowsize + 2*self.flankingsize) + 1
-                folderIndDict[folder] = np.arange(nr_samples)
-                globalIndex += nr_samples
-                globalIndexMapping[globalIndex] = [chromName, folder]
-                #this means that all samples with global index [0...$globalIndex) 
-                #are taken from chromosome $chromName, bigwig folder $folder
-                #and so on for higher indices
-            localIndices[chromName] = folderIndDict
-        globalIndex = np.arange(max([x for x in globalIndexMapping]))
-        return localIndices, globalIndex, globalIndexMapping
-
-    def __getMatrixData(self, mName, chromName, idx):
-        if self.matrixDict is None:
-            return None
-        #the 0-th matrix starts flankingsize away from the boundary
-        startInd = idx + self.flankingsize
-        stopInd = startInd + self.windowsize
-        trainmatrix = None
-        if self.maxdist == self.windowsize: #triangles, i. e. full submatrices
-            trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(self.windowsize)]
-        else: #trapezoids, i.e. distance limited submatrices
-            trainmatrix = self.matrixDict[mName]["data"][chromName][startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(self.windowsize, utils.maskFunc, self.maxdist)]
-        trainmatrix = np.nan_to_num(trainmatrix)
-        return trainmatrix
-
-    def __getFactorData(self, folder, chromName, idx):
-        startInd = idx
-        stopInd = startInd + self.windowsize + 2*self.flankingsize
-        return self.factorDict[folder]["data"][chromName][startInd:stopInd,:]
-    
-    def __checkGetDNAsequence(self, folder, chromname, idx):
-        #check if the DNA sequence is already loaded
-        #and reload, if not
-        #this method should work as long as there are 
-        #more batches in each chromosome than worker threads
-        startInd = idx + self.flankingsize * self.binsize
-        stopInd = startInd + self.windowsize * self.binsize            
-        requiredSeqFile = self.factorDict[folder]["seqFile"]
-        requiredChromName = self.factorDict[folder]["seqID"][chromname]
-        requiredSeqIdentifier = requiredSeqFile + "_" + str(requiredChromName)
-        retArr = None
-        with self._dnaSequenceLock:
-            #check if the seqFile is loaded already
-            oldSeqIndex = (self.currentSequenceIndex + 1) % 2
-            currentSeqDict = self.dnaSequenceList[self.currentSequenceIndex]
-            oldSeqDict = self.dnaSequenceList[oldSeqIndex]
-            if requiredSeqIdentifier not in currentSeqDict \
-                and requiredSeqIdentifier not in oldSeqDict:
-                presentIdListOld = [identifier for identifier in oldSeqDict]
-                #presentIdListCurr = [identifier for identifier in currentSeqDict]
-                #load the sequence data from disk
-                tmp_seqStr = utils.readSequencesPerId(requiredSeqFile, requiredChromName)
-                encodedSeqArr = utils.fillEncodedSequence(utils.encodeSequence(tmp_seqStr),self.binsize)
-                retArr = encodedSeqArr[startInd:stopInd]
-                #replace "old" dict with new data and update pointer to "current" dict
-                self.dnaSequenceList[oldSeqIndex] = {requiredSeqIdentifier: encodedSeqArr}
-                self.currentSequenceIndex = oldSeqIndex
-                threadName = threading.current_thread().getName()
-                msg = "Thread {:s} has loaded {:s}, replacing {:s}"
-                msg = msg.format(threadName, requiredSeqIdentifier, ", ".join(presentIdListOld))
-                print(msg)
-            elif requiredSeqIdentifier in currentSeqDict:
-                retArr = currentSeqDict[requiredSeqIdentifier][startInd:stopInd]
-            else:
-                retArr = oldSeqDict[requiredSeqIdentifier][startInd:stopInd]
-        return retArr
-
 class CustomReshapeLayer(tf.keras.layers.Layer):
     '''
     reshape a 1D tensor such that it represents 
@@ -446,6 +211,9 @@ class CustomReshapeLayer(tf.keras.layers.Layer):
                                         values=inputVec, 
                                         dense_shape=[self.matsize, self.matsize] )
         return tf.sparse.to_dense(sparseTriuTens)
+
+    def get_config(self):
+        return {"matsize": self.matsize}
 
 class TadInsulationScoreLayer(tf.keras.layers.Layer):
     '''
@@ -474,6 +242,53 @@ class TadInsulationScoreLayer(tf.keras.layers.Layer):
         l = [ inputMat[i:j,k:l] for i,j,k,l in zip(rowStartList,rowEndList,columnStartList,columnEndList) ]
         l = [ tf.reduce_mean(i) for i in l ]
         return tf.stack(l)
+    
+    def get_config(self):
+        return {"matsize": self.matsize, "diamondsize": self.diamondsize}
+
+class SymmetricFromTriuLayer(tf.keras.layers.Layer):
+    '''
+    make upper triangular tensors symmetric
+    example:
+    [[1,2,3],
+     [0,4,5],
+     [0,0,6]] 
+    becomes:
+    [[1,2,3],
+     [2,4,5],
+     [3,5,6]] 
+    '''
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, inputs):
+        return tf.map_fn(self.makeSymmetric, inputs, parallel_iterations=20, swap_memory=True)
+
+    def makeSymmetric(self, inputMat):
+        outMat = inputMat + tf.transpose(inputMat) - tf.linalg.band_part(inputMat, 0, 0)
+        #the diagonal is the same for input and transpose, so subtract it once
+        return outMat
+
+class ScalingLayer(tf.keras.layers.Layer):
+    def __init__(self, maxval=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.maxval = maxval
+
+    def call(self, inputs):
+        return tf.map_fn(self.scale, inputs, parallel_iterations=20, swap_memory=True)
+
+    def scale(self, inputs):
+        minTens = tf.reduce_min(inputs)
+        maxTens = tf.reduce_max(inputs)
+        enumTens = tf.subtract(inputs, minTens)
+        denomTens = tf.subtract(maxTens, minTens)
+        def d1(): return inputs
+        def d2(): return tf.math.divide(enumTens, denomTens) * self.maxval
+        retTens = tf.cond(tf.math.equal(minTens, maxTens), d1, d2)
+        return retTens
+
+    def get_config(self):
+        return {"maxval": self.maxval}
 
 def customLossWrapper(pMatrixsize, pDiamondsize):
     def customLoss(y_true, y_pred):
@@ -485,3 +300,118 @@ def customLossWrapper(pMatrixsize, pDiamondsize):
         predLoss = tf.reduce_mean(predLoss)
         return predLoss
     return customLoss
+
+def getOptimizer(pOptimizerString, pLearningrate):
+    kerasOptimizer = None
+    if pOptimizerString == "SGD":
+        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=pLearningrate)
+    elif pOptimizerString == "Adam":
+        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=pLearningrate)
+    elif pOptimizerString == "RMSprop":
+        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=pLearningrate)
+    else:
+        raise NotImplementedError("unknown optimizer")
+    return kerasOptimizer
+
+def lossFunction(pixelLoss="MSE", pixelWeight=1.0,
+                 windowsize=None,
+                 scoreWeight=0.0, diamondsize=None,\
+                 tvWeight=0.0,\
+                 msSSIMweight=0.0,\
+                 perceptionWeight=0.0):
+    #sanity check for inputs
+    errorMsg = []
+    if scoreWeight > 0 and (not isinstance(windowsize, int) or not isinstance(diamondsize, int)):
+        errorMsg.append("If scoreWeight > 0.0, Windowsize and Diamondsize must be set (int32 > 0)")
+    if isinstance(windowsize, int) and isinstance(diamondsize, int) and windowsize - 2*diamondsize <= 1:
+        errorMsg.append("Diamondsize too large or Windowsize too small, Windowsize must be >> 2*Diamondsize")
+    if not isinstance(windowsize, int) and (tvWeight > 0.0 or msSSIMweight > 0.0 or perceptionWeight > 0.0):
+        errorMsg.append("TV loss, MS-SSIM loss and Perception loss require Windowsize")
+    if len(errorMsg) > 0:
+        errorMsg = "\n".join(errorMsg)
+        raise ValueError(errorMsg)
+
+    #choose appropriate loss function for "simple" regression loss
+    if pixelLoss == "MSE":
+        loss_fn = tf.keras.losses.MeanSquaredError()
+    elif pixelLoss.startswith("Huber"):
+        try:
+            delta = float(pixelLoss.lstrip("Huber"))
+            loss_fn = tf.keras.losses.Huber(delta=delta)       
+        except:
+            loss_fn = tf.keras.losses.Huber()
+    elif pixelLoss == "MAE":
+        loss_fn = tf.keras.losses.MeanAbsoluteError()
+    elif pixelLoss == "MAPE":
+        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
+    elif pixelLoss == "MSLE":
+        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
+    elif pixelLoss == "Cosine":
+        loss_fn = tf.keras.losses.CosineSimilarity()
+    else:
+        raise NotImplementedError("unknown loss function")
+    reshapeLayer = None
+    tadScoreLayer = None
+    makeSymmetricLayer = None
+    scalingLayer = None
+    perceptionModel = None 
+
+    if isinstance(windowsize, int):
+        reshapeLayer = CustomReshapeLayer(windowsize)
+        makeSymmetricLayer = SymmetricFromTriuLayer()
+        scalingLayer = ScalingLayer(maxval=0.999)
+        #max filter size for ms-ssim
+        maxfiltersize = min(int(np.floor(windowsize / 2**4)), 11)
+    if scoreWeight > 0.0:
+        tadScoreLayer = TadInsulationScoreLayer(windowsize, diamondsize)
+    if perceptionWeight > 0.0:
+        # pre-trained VGG16 model for perception loss
+        model = vgg16.VGG16(weights="imagenet", include_top=False, input_shape=(windowsize, windowsize, 3))  
+        model.trainable = False
+        structureOutput = model.get_layer("block4_conv3").output
+        perceptionModel = Model(inputs=model.inputs, outputs=structureOutput)
+
+    def loss_function(y_true, y_pred):
+        loss = tf.zeros(shape=())
+        if pixelWeight > 0.0:
+            #compute the regression loss
+            loss += loss_fn(y_true, y_pred) * pixelWeight
+        if tvWeight > 0. or msSSIMweight > 0. or perceptionWeight > 0. or scoreWeight > 0.0:
+            #create images from the flat vectors
+            y_true_scaled = scalingLayer(y_true) #value range 0..0.999
+            y_true_matrix = reshapeLayer(y_true_scaled) #2D embedding as upper triangle
+            y_true_symmetric = makeSymmetricLayer(y_true_matrix) #symmetric matrix
+            y_true_grayscale = tf.expand_dims(y_true_symmetric, axis=-1) #make it an image with channels last, i.e. shape = (batchsize, matsize, matsize, 1)      
+            y_pred_scaled = scalingLayer(y_pred) 
+            y_pred_matrix = reshapeLayer(y_pred_scaled)
+            y_pred_symmetric = makeSymmetricLayer(y_pred_matrix)
+            y_pred_grayscale = tf.expand_dims(y_pred_symmetric, axis=-1)
+            #compute total variation loss
+            if tvWeight > 0.0:
+                tvLoss = tf.reduce_sum(tf.image.total_variation(y_pred_grayscale)) 
+                loss += tvLoss * tvWeight
+            #compute multi-scale structural similarity index
+            if msSSIMweight > 0.0:
+                #msSSIM = tf.image.ssim_multiscale(tf.image.convert_image_dtype(y_true_grayscale, tf.uint8), tf.image.convert_image_dtype(y_pred_grayscale, tf.uint8), 255, filter_size=maxfiltersize)
+                #msSSIM = tf.where(tf.math.is_nan(msSSIM), tf.ones_like(msSSIM), msSSIM)
+                #msSSIM = tf.where(tf.math.is_inf(msSSIM), tf.ones_like(msSSIM), msSSIM)
+                #msSSIMloss = 1 - tf.reduce_mean( msSSIM )
+                msSSIM = tf.image.ssim(y_true_grayscale, y_pred_grayscale, 1., filter_size=maxfiltersize)
+                mSSIMloss = 1.0 - tf.reduce_mean(msSSIM)
+                loss += mSSIMloss * msSSIMweight
+            #compute TAD insulation scores
+            if scoreWeight > 0.0:
+                predScore = tadScoreLayer(y_pred_symmetric)
+                trueScore = tadScoreLayer(y_true_symmetric)
+                scoreLoss = tf.reduce_mean(tf.square(trueScore - predScore))
+                loss += scoreLoss * scoreWeight
+            #compute perception loss
+            if perceptionWeight > 0.0:
+                predRGB = tf.image.grayscale_to_rgb(y_pred_grayscale)
+                trueRGB = tf.image.grayscale_to_rgb(y_true_grayscale)
+                predActivations = perceptionModel(predRGB)
+                trueActivations = perceptionModel(trueRGB)
+                perceptionLoss = tf.reduce_mean(tf.square(trueActivations - predActivations))
+                loss += perceptionLoss * perceptionWeight
+        return loss
+    return loss_function
