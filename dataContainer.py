@@ -396,8 +396,8 @@ class DataContainer():
         factorArray = self.__getFactorData(idx)
         matrixArray = self.__getMatrixData(idx)
         sequenceArray = self.__getSequenceData(idx)
-        return {"factorData": factorArray, 
-                "out_matrixData": matrixArray, 
+        return {"factorData": factorArray.astype("float32"), 
+                "out_matrixData": matrixArray.astype("float32"), 
                 "sequenceData": sequenceArray}
         
     def plotFeatureAtIndex(self, idx, outpath, figuretype="png"):
