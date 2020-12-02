@@ -87,23 +87,29 @@ tf.random.set_seed(35)
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
                 default="initial", show_default=True,
                 help="Type of model to use")
-@click.option("--includeScore", "-ics", required=False,
-                type=bool, default=False, show_default=True,
-                help="include insulation score for optimization")
 @click.option("--scoreWeight", "-scw", required=False,
-                type=click.FloatRange(min=0.01), default=1.0, show_default=True,
-                help="weight for score loss (matrix loss is 1.0). Only relevant if includeScore is True")
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for insulation score loss (matrix loss is 1.0). Default 0.0 means score loss is not used")
 @click.option("--scoreSize", "-ssz", required=False,
-                type=click.IntRange(min=1.0), 
-                help="size for computation of insulation score. Must be (much) smaller than windowsize")
+                type=click.IntRange(min=1), 
+                help="Size for computation of insulation score loss. Must be (much) smaller than windowsize. Only relevant, if scoreWeight > 0")
+@click.option("--tvWeight", "-tvw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for Total Variation loss. Default 0.0 means TV loss is not used")
+@click.option("--structureWeight", "-stw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for MS-SSIM loss. Default 0.0 means MS-SSIM loss is not used")
+@click.option("--perceptionWeight", "-pcw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for perception loss. Default 0.0 means perception loss is not used")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
                 default="SGD", show_default=True,
-                help="Optimizer to use: SGD, Adam, RMSprop or cosine similarity.")
+                help="Optimizer to use: SGD (recommended), Adam or RMSprop")
 @click.option("--loss", "-l", required=False,
                 type=click.Choice(["MSE", "Huber0.1", "Huber0.5", "Huber1.0", "Huber5.0", "Huber10.0" "Huber100.0", "Huber1000.0", "MAE", "MAPE", "MSLE", "Cosine"]),
                 default="MSE", show_default=True,
-                help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity.")
+                help="Loss function to use for per-pixel loss: Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity.")
 @click.option("--earlyStopping", "-early",
                 required=False, type=click.IntRange(min=5),
                 help="patience for early stopping, stop after this number of epochs w/o improvement in validation loss")
@@ -140,9 +146,11 @@ def training(trainmatrices,
             clampfactors,
             scalefactors,
             modeltype,
-            includescore,
             scoreweight,
             scoresize,
+            tvweight,
+            structureweight,
+            perceptionweight,
             optimizer,
             loss,
             earlystopping,
@@ -163,7 +171,7 @@ def training(trainmatrices,
         flankingsize = windowsize
         paramDict["flankingsize"] = flankingsize
     
-    if scoresize is None and includescore:
+    if scoresize is None and scoreweight > 0.0:
         scoresize = int(windowsize * 0.25)
         paramDict["scoresize"] = scoresize
 
@@ -193,8 +201,7 @@ def training(trainmatrices,
 
     #select the correct class for the data container
     containerCls = dataContainer.DataContainer
-    if includescore:
-        containerCls = dataContainer.DataContainerWithScores
+    
     #prepare the training data containers. No data is loaded yet.
     traindataContainerList = []
     for chrom in trainChromNameList:
@@ -222,8 +229,6 @@ def training(trainmatrices,
                   "windowsize": windowsize,
                   "flankingsize": flankingsize,
                   "maxdist": maxdist}
-    if includescore:
-        loadParams["diamondsize"] = scoresize
     #now load the data and write TFRecords, one container at a time.
     if len(traindataContainerList) == 0:
         msg = "Exiting. No data found"
@@ -286,21 +291,23 @@ def training(trainmatrices,
                                     pNrFactors=nr_factors,
                                     pNrSymbols=nr_symbols,
                                     pFlankingSize=flankingsize,
-                                    pMaxDist=maxdist,
-                                    pIncludeScore=includescore)
+                                    pMaxDist=maxdist)
     #define optimizer
-    kerasOptimizer = getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
+    kerasOptimizer = models.getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
     
     #define loss(es)
-    loss_fn, loss_weights = getLosses(pLossStr = loss, 
-                                        includeScore=includescore, 
-                                        windowsize=windowsize, 
-                                        diamondsize=scoresize, 
-                                        scoreWeight=scoreweight)
+    loss_fn = models.lossFunction(pixelLoss=loss,
+                                  pixelWeight=0.,
+                                  windowsize=windowsize,
+                                  scoreWeight=scoreweight,
+                                  diamondsize=scoresize,
+                                  tvWeight=tvweight,
+                                  msSSIMweight=structureweight,
+                                  perceptionWeight=perceptionweight)
 
     #compile the model
     model.compile(optimizer=kerasOptimizer, 
-                 loss=loss_fn, loss_weights=loss_weights)
+                 loss=loss_fn)
     model.summary()
 
     #callbacks to check the progress etc.
@@ -352,7 +359,16 @@ def training(trainmatrices,
                                             compression_type="GZIP")
     validationDs = validationDs.map(lambda x: records.parse_function(x, storedFeaturesDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
     validationDs = validationDs.batch(batchsize)
+    validationDs = validationDs.take(1)
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
+
+    tds1 = trainDs.take(1)
+    tds1_train = list(tds1.map(lambda x,y: x).as_numpy_iterator())
+    tds1_targs = list(tds1.map(lambda x,y: y).as_numpy_iterator())
+    tds1_targs = tds1_targs[0]["out_matrixData"]
+    outs1 = model(tds1_train).numpy()
+    losssss = loss_fn(tds1_targs, outs1)
+    weights_before = model.layers[1].weights[0].numpy()
 
     #train the neural network
     history = model.fit(trainDs,
@@ -364,6 +380,10 @@ def training(trainmatrices,
 
     #store the trained network
     model.save(filepath=modelfilepath,save_format="h5")
+    weights_after = model.layers[1].weights[0].numpy()
+
+    print("weight sum before", np.sum(weights_before))
+    print("weight sum after", np.sum(weights_after))
 
     #plot train- and validation loss over epochs
     lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
@@ -387,50 +407,6 @@ def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
         msg += "Changed model type to >sequence<"
         print(msg)
     return modeltypeStr
-
-def getOptimizer(pOptimizerString, pLearningrate):
-    kerasOptimizer = None
-    if pOptimizerString == "SGD":
-        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=pLearningrate)
-    elif pOptimizerString == "Adam":
-        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=pLearningrate)
-    elif pOptimizerString == "RMSprop":
-        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=pLearningrate)
-    else:
-        raise NotImplementedError("unknown optimizer")
-    return kerasOptimizer
-
-def getLosses(pLossStr, includeScore=False, windowsize=None, diamondsize=None, scoreWeight=None):
-    if includeScore and (windowsize is None or diamondsize is None or scoreWeight is None):
-        msg = "must set windowsize, diamondsize and scoreWeight when includeScore is True"
-        raise ValueError(msg)
-    loss_fn = None
-    loss_weights = None
-    if pLossStr == "MSE":
-        loss_fn = tf.keras.losses.MeanSquaredError()
-    elif pLossStr.startswith("Huber"):
-        try:
-            delta = float(pLossStr.lstrip("Huber"))
-            loss_fn = tf.keras.losses.Huber(delta=delta)       
-        except:
-            loss_fn = tf.keras.losses.Huber()
-    elif pLossStr == "MAE":
-        loss_fn = tf.keras.losses.MeanAbsoluteError()
-    elif pLossStr == "MAPE":
-        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
-    elif pLossStr == "MSLE":
-        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
-    elif pLossStr == "Cosine":
-        loss_fn = tf.keras.losses.CosineSimilarity()
-    else:
-        raise NotImplementedError("unknown loss function")
-    #include second loss function, if model includes insulation score
-    if includeScore:
-        loss_fn = {"out_matrixData": loss_fn,
-                   "out_scoreData": models.customLossWrapper(windowsize, diamondsize)}
-        loss_weights = {"out_matrixData": 1.0, "out_scoreData": scoreWeight}
-    return  loss_fn, loss_weights
-
 
 if __name__ == "__main__":
     training() #pylint: disable=no-value-for-parameter
