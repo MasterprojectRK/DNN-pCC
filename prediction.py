@@ -100,9 +100,11 @@ def prediction(validationmatrix,
     modelLoadParams = {"filepath": trainedmodel}
     try:
         trainedModel = tf.keras.models.load_model(**modelLoadParams)
+        weightsFirstLayer = trainedModel.layers[1].weights[0].numpy()
+        print("weight sum {:.3f}".format(np.sum(weightsFirstLayer)))
     except Exception as e:
         print(e)
-        msg = "Could not load trained model {:s} - Wrong file?"
+        msg = "Could not load trained model {:s} - Wrong file or format?"
         msg = msg.format(trainedmodel)
         raise SystemExit(msg)
 
