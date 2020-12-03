@@ -180,6 +180,11 @@ def training(trainmatrices,
         scoresize = int(windowsize * 0.25)
         paramDict["scoresize"] = scoresize
 
+    #workaround for AlreadyExistsException when using perception loss
+    #root cause seems to be a bug in grappler?
+    if perceptionweight > 0.0:
+        tf.config.optimizer.set_experimental_options({"arithmetic_optimization": False})
+
     trainChromNameList = trainchromosomes.rstrip().split(" ")  
     trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
 
