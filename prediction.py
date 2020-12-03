@@ -90,16 +90,14 @@ def prediction(validationmatrix,
         raise SystemExit(msg)
     #score was not used previously
     try:
-        includeScore = trainParamDict["includescore"] == "True"
-        scoreSize = int(trainParamDict["scoresize"])    
+        scoreSize = int(trainParamDict["scoresize"])
+        scoreWeight = int(trainParamDict["scoreweight"])    
     except:
-        includeScore = False
         scoreSize = None
+        scoreWeight = 0.0
     
     #load the trained model
     modelLoadParams = {"filepath": trainedmodel}
-    if includeScore:
-        modelLoadParams["custom_objects"] = {"customLoss": models.customLossWrapper(windowsize,scoreSize)}
     try:
         trainedModel = tf.keras.models.load_model(**modelLoadParams)
     except Exception as e:
@@ -117,8 +115,6 @@ def prediction(validationmatrix,
     chromNameList = sorted([x.lstrip("chr") for x in chromNameList])
 
     containerCls = dataContainer.DataContainer
-    if includeScore and validationmatrix is not None:
-        containerCls = dataContainer.DataContainerWithScores
     testdataContainerList = []
     for chrom in chromNameList:
         testdataContainerList.append(containerCls(chromosome=chrom,
@@ -133,8 +129,6 @@ def prediction(validationmatrix,
                   "windowsize": windowsize,
                   "flankingsize": flankingsize,
                   "maxdist": maxdist}
-    if includeScore and validationmatrix is not None:
-        loadParams["diamondsize"] = scoreSize
     #now load the data and write TFRecords, one container at a time.
     if len(testdataContainerList) == 0:
         msg = "Exiting. No data found"
@@ -166,15 +160,19 @@ def prediction(validationmatrix,
                                         num_parallel_reads=None,
                                         compression_type="GZIP")
     testDs = testDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    testDs = testDs.batch(batchSizeInt)
+    testDs = testDs.batch(batchSizeInt) #do NOT drop the last batch (maybe incomplete, i.e. smaller, because batch size doesn't integer divide chrom size)
     if validationmatrix is not None:
         testDs = testDs.map(lambda x, y: x) #drop the target matrices (they are for evaluation)
     testDs = testDs.prefetch(tf.data.experimental.AUTOTUNE)
 
     #feed the chromatin factors through the trained model
-    predMatrixArray = trainedModel.predict(testDs)
-    if includeScore:
-        predMatrixArray = predMatrixArray[0] #the two outputs are identical
+    predList = []
+    for x in testDs:
+        predBatch = predStep(trainedModel, x).numpy()
+        for i in range(predBatch.shape[0]):
+            predList.append(predBatch[i])        
+    predMatrixArray = np.array(predList)
+    
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
@@ -226,7 +224,7 @@ def prediction(validationmatrix,
                      pChromosomeList=chromNameList,
                      pMetadata=metadata)
     
-    if includeScore:
+    if scoreWeight > 0.0 and isinstance(scoreSize, int):
         bedgraphFileName = "scorePrediction_ds{:d}.bedgraph".format(scoreSize)            
         bedgraphFileName = os.path.join(outputpath, bedgraphFileName)
         scoreList = [utils.computeScore(pMatrix=i, pDiamondsize=scoreSize) for i in tqdm(matrixPerChromList, desc="computing scores")]
@@ -248,12 +246,11 @@ def prediction(validationmatrix,
         evalDs = evalDs.batch(batchSizeInt)
         evalDs = evalDs.prefetch(tf.data.experimental.AUTOTUNE)
         
-        loss = trainedModel.evaluate(evalDs)
-        if includeScore:
-            msg = "total loss: {:.3f} - matrix loss: {:.3f} - score loss: {:.3f}"
-            msg = msg.format(loss[0], loss[1], loss[2])
-        else:
-            msg = "loss: {:.3f}".format(loss)
+        lossList = []
+        for x,y in evalDs:
+            loss = evalStep(trainedModel, x, y)
+            lossList.append(loss)
+        msg = "loss: {:.3f}".format(np.mean(lossList))
         print(msg)
 
     #store results
@@ -266,6 +263,20 @@ def prediction(validationmatrix,
     for record in tqdm(tfRecordFilenames, "removing TFRecords"):
         if os.path.exists(record):
             os.remove(record)
+
+@tf.function
+def predStep(trainedModel, inputBatch):
+    pred_vals = trainedModel(inputBatch)
+    return pred_vals
+
+@tf.function
+def evalStep(trainedModel, inputBatch, targetBatch, lossFn=tf.keras.losses.MeanSquaredError()):
+    pred_vals = trainedModel(inputBatch)
+    true_vals = targetBatch["out_matrixData"]
+    loss = lossFn(true_vals, pred_vals)
+    return loss
+
+
 
 if __name__ == "__main__":
     prediction() #pylint: disable=no-value-for-parameter
