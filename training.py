@@ -352,10 +352,14 @@ def training(trainmatrices,
     grayscaleMod = models.getGrayscaleConversionModel(scalingFactor=0.999, windowsize=windowsize)
     #get the per-pixel loss function (also used for perception loss and score loss)
     loss_fn = models.getPerPixelLoss(loss)
+    #lists to store loss for each epoch
+    trainLossList_epochs = [] 
     valLossList_epochs = []
+    #iterate over all epochs and batches in the train/validation datasets
+    #compute gradients and update weights accordingly
     for epoch in range(numberepochs):
         pbar_batch = tqdm(trainDs, total=int(np.floor(nr_trainingSamples / batchsize)))
-        trainLossList_batches = [] #loss for each batch
+        trainLossList_batches = [] #lists to store loss for each batch
         for x, y in pbar_batch:
             lossVal = trainStep(creationModel=model, 
                                 grayscaleConversionModel=grayscaleMod, 
@@ -400,7 +404,7 @@ def training(trainmatrices,
     #store the trained network
     model.save(filepath=modelfilepath,save_format="h5")
 
-    #plot train- and validation loss over epochs
+    #plot final train- and validation loss over epochs
     utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
                     pNameList=["train", "validation"],
                     pFilename=lossPlotFilename)
@@ -410,6 +414,8 @@ def training(trainmatrices,
         for record in tqdm(traindataRecords + validationdataRecords, desc="Deleting TFRecord files"):
             if os.path.exists(record):
                 os.remove(record)
+
+
 @tf.function
 def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None, lossFn=tf.keras.losses.MeanSquaredError()):
     with tf.GradientTape() as tape:
