@@ -252,7 +252,10 @@ def prediction(validationmatrix,
         for x,y in evalDs:
             loss = evalStep(trainedModel, x, y)
             lossList.append(loss)
-        msg = "loss: {:.3f}".format(np.mean(lossList))
+        batchIndexList = [int(np.ceil(i/batchSizeInt)) for i in indicesList]
+        lossPerChromList = [np.mean(lossList[i:j]) for i, j in zip(batchIndexList, batchIndexList[1:])]
+        chromLossStrList = ["Chrom {:s}: {:.3f}".format(chrom, loss) for chrom, loss in zip(chromNameList, lossPerChromList)] 
+        msg = "Mean loss(es):\n {:s}".format("\n".join(chromLossStrList))
         print(msg)
 
     #store results
