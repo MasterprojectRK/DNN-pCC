@@ -350,7 +350,8 @@ def training(trainmatrices,
     #models for converting predictions as needed
     percLossMod = models.getPerceptionModel(windowsize)
     grayscaleMod = models.getGrayscaleConversionModel(scalingFactor=0.999, windowsize=windowsize)
-    trainLossList_epochs = [] #loss for each epoch
+    #get the per-pixel loss function (also used for perception loss and score loss)
+    loss_fn = models.getPerPixelLoss(loss)
     valLossList_epochs = []
     for epoch in range(numberepochs):
         pbar_batch = tqdm(trainDs, total=int(np.floor(nr_trainingSamples / batchsize)))
@@ -366,7 +367,8 @@ def training(trainmatrices,
                                 ssimWeight=structureweight, 
                                 tvWeight=tvweight, 
                                 perceptionWeight=perceptionweight,
-                                scoreWeight=scoreweight
+                                scoreWeight=scoreweight,
+                                lossFn = loss_fn
                                 )
             trainLossList_batches.append(lossVal)
             pbar_batch.set_postfix( {"loss": "{:.4f}".format(lossVal)} )

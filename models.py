@@ -427,6 +427,27 @@ def getPerceptionModel(windowsize):
         layer.trainable = False
     return perceptionModel
 
+def getPerPixelLoss(pixelLoss: str):
+    if pixelLoss == "MSE":
+        loss_fn = tf.keras.losses.MeanSquaredError()
+    elif pixelLoss.startswith("Huber"):
+        try:
+            delta = float(pixelLoss.lstrip("Huber"))
+            loss_fn = tf.keras.losses.Huber(delta=delta)       
+        except:
+            loss_fn = tf.keras.losses.Huber()
+    elif pixelLoss == "MAE":
+        loss_fn = tf.keras.losses.MeanAbsoluteError()
+    elif pixelLoss == "MAPE":
+        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
+    elif pixelLoss == "MSLE":
+        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
+    elif pixelLoss == "Cosine":
+        loss_fn = tf.keras.losses.CosineSimilarity()
+    else:
+        raise NotImplementedError("unknown loss function")
+    return loss_fn
+
 def getGrayscaleConversionModel(scalingFactor, windowsize):
     inputs = Input(shape=(int(windowsize * (windowsize + 1) / 2 )) )
     x = ScalingLayer(maxval=scalingFactor)(inputs)
