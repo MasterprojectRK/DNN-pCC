@@ -409,14 +409,15 @@ def training(trainmatrices,
             if os.path.exists(record):
                 os.remove(record)
 @tf.function
-def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None):
+def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None, lossFn=tf.keras.losses.MeanSquaredError()):
     with tf.GradientTape() as tape:
         loss = tf.zeros(shape=())
         predVec = creationModel(factorInputBatch)
         trueVec = targetInputBatch['out_matrixData']
         #per-pixel MSE
         if pixelLossWeight > 0.0:
-            loss += tf.reduce_mean( tf.square(trueVec - predVec)  ) * pixelLossWeight
+            #loss += tf.reduce_sum( tf.square(trueVec - predVec) ) * pixelLossWeight
+            loss += lossFn(trueVec, predVec)
         #convert vector batches to grayscale image batches
         y_true_grayscale = grayscaleConversionModel(trueVec)     
         y_pred_grayscale = grayscaleConversionModel(predVec)
@@ -426,7 +427,8 @@ def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetI
             y_pred_rgb = tf.image.grayscale_to_rgb(y_pred_grayscale)
             predActivations = perceptionLossModel(y_pred_rgb)
             trueActivations = perceptionLossModel(y_true_rgb)
-            loss += tf.reduce_mean( tf.square(trueActivations - predActivations) ) * perceptionWeight
+            perceptionLoss = lossFn(trueActivations, predActivations)
+            loss += perceptionLoss * perceptionWeight
         #Total Variation loss
         if tvWeight > 0.0:
             tvLoss = tf.reduce_sum(tf.image.total_variation(y_pred_grayscale)) 
@@ -440,18 +442,18 @@ def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetI
         if scoreWeight > 0.0:
             predScore = models.TadInsulationScoreLayer(80,15)(y_pred_grayscale)
             trueScore = models.TadInsulationScoreLayer(80,15)(y_true_grayscale)
-            scoreLoss = tf.reduce_mean(tf.square(trueScore - predScore))
+            scoreLoss = lossFn(trueScore, predScore)
             loss += scoreLoss * scoreWeight
     gradients = tape.gradient(loss, creationModel.trainable_variables)
     optimizer.apply_gradients(zip(gradients, creationModel.trainable_variables))
     return loss
 
 @tf.function
-def validationStep(creationModel, factorInputBatch, targetInputBatch, pixelLossWeight=1.0):
+def validationStep(creationModel, factorInputBatch, targetInputBatch, pixelLossWeight=1.0, lossFn=tf.keras.losses.MeanSquaredError()):
     val_loss = tf.zeros(shape=())
     predVec = creationModel(factorInputBatch)
     trueVec = targetInputBatch['out_matrixData']
-    val_loss += tf.reduce_mean( tf.square(trueVec - predVec) * pixelLossWeight)
+    val_loss += lossFn(trueVec,predVec) * pixelLossWeight
     return val_loss
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
