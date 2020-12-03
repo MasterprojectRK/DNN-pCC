@@ -344,6 +344,10 @@ def training(trainmatrices,
 
     weights_before = model.layers[1].weights[0].numpy()
 
+    #filename for plots
+    lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
+    lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
+    #models for converting predictions as needed
     percLossMod = models.getPerceptionModel(windowsize)
     grayscaleMod = models.getGrayscaleConversionModel(scalingFactor=0.999, windowsize=windowsize)
     trainLossList_epochs = [] #loss for each epoch
@@ -370,10 +374,6 @@ def training(trainmatrices,
         trainLossList_batches = []
         with summary_writer_train.as_default(): #pylint: disable=not-context-manager
             tf.summary.scalar('train_loss', trainLossList_epochs[epoch], step=epoch+1)
-        if epoch % savefreq == 0:
-            checkpointFilename = "checkpoint_{:05d}.h5".format(epoch)
-            checkpointFilename = os.path.join(outputpath, checkpointFilename)
-            model.save(filepath=checkpointFilename,save_format="h5")
         valLossList_batches = []
         for x,y in validationDs:
             val_loss = validationStep(creationModel=model, factorInputBatch=x, targetInputBatch=y, pixelLossWeight=1.0 )
@@ -382,6 +382,14 @@ def training(trainmatrices,
         valLossList_batches = []
         with summary_writer_val.as_default(): #pylint: disable=not-context-manager
             tf.summary.scalar('validation_loss', valLossList_epochs[epoch], step=epoch+1)
+        #plot loss and save figure every savefreq epochs
+        if (epoch + 1) % savefreq == 0:
+            checkpointFilename = "checkpoint_{:05d}.h5".format(epoch + 1)
+            checkpointFilename = os.path.join(outputpath, checkpointFilename)
+            model.save(filepath=checkpointFilename,save_format="h5")
+            utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
+                    pNameList=["train", "validation"],
+                    pFilename=lossPlotFilename)
 
     weights_after = model.layers[1].weights[0].numpy()
     print("weight sum before", np.sum(weights_before))
@@ -391,8 +399,6 @@ def training(trainmatrices,
     model.save(filepath=modelfilepath,save_format="h5")
 
     #plot train- and validation loss over epochs
-    lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
-    lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
     utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
                     pNameList=["train", "validation"],
                     pFilename=lossPlotFilename)
