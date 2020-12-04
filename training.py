@@ -390,7 +390,7 @@ def training(trainmatrices,
             tf.summary.scalar('train_loss', trainLossList_epochs[epoch], step=epoch+1)
         valLossList_batches = []
         for x,y in validationDs:
-            val_loss = validationStep(creationModel=model, factorInputBatch=x, targetInputBatch=y, pixelLossWeight=1.0 )
+            val_loss = validationStep(creationModel=model, factorInputBatch=x, targetInputBatch=y, pixelLossWeight=pixellossweight )
             valLossList_batches.append(val_loss)
         valLossList_epochs.append(np.mean(valLossList_batches))
         valLossList_batches = []
