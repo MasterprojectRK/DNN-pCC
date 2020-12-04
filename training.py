@@ -406,6 +406,9 @@ def training(trainmatrices,
             utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
                     pNameList=["train", "validation"],
                     pFilename=lossPlotFilename)
+        if (epoch + 1) % 5 == 0:
+            msg = "epoch {:d} - val. loss {:.3f}".format(epoch+1, valLossList_epochs[-1])
+            print(msg)
 
     weights_after = model.layers[1].weights[0].numpy()
     print("weight sum before", np.sum(weights_before))
