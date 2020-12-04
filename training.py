@@ -367,6 +367,7 @@ def training(trainmatrices,
     #compute gradients and update weights accordingly
     for epoch in range(numberepochs):
         pbar_batch = tqdm(trainDs, total=int(np.floor(nr_trainingSamples / batchsize)))
+        pbar_batch.set_description("Epoch {:05d}".format(epoch+1))
         trainLossList_batches = [] #lists to store loss for each batch
         for x, y in pbar_batch:
             lossVal = trainStep(creationModel=model, 
