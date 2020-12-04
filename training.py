@@ -431,7 +431,7 @@ def training(trainmatrices,
 def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None, lossFn=tf.keras.losses.MeanSquaredError()):
     with tf.GradientTape() as tape:
         loss = tf.zeros(shape=())
-        predVec = creationModel(factorInputBatch)
+        predVec = creationModel(factorInputBatch, training=True)
         trueVec = targetInputBatch['out_matrixData']
         #per-pixel MSE
         if pixelLossWeight > 0.0:
@@ -470,7 +470,7 @@ def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetI
 @tf.function
 def validationStep(creationModel, factorInputBatch, targetInputBatch, pixelLossWeight=1.0, lossFn=tf.keras.losses.MeanSquaredError()):
     val_loss = tf.zeros(shape=())
-    predVec = creationModel(factorInputBatch)
+    predVec = creationModel(factorInputBatch, training=False)
     trueVec = targetInputBatch['out_matrixData']
     val_loss += lossFn(trueVec,predVec) * pixelLossWeight
     return val_loss

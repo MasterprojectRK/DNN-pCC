@@ -271,12 +271,12 @@ def prediction(validationmatrix,
 
 @tf.function
 def predStep(trainedModel, inputBatch):
-    pred_vals = trainedModel(inputBatch)
+    pred_vals = trainedModel(inputBatch, training=False)
     return pred_vals
 
 @tf.function
 def evalStep(trainedModel, inputBatch, targetBatch, lossFn=tf.keras.losses.MeanSquaredError()):
-    pred_vals = trainedModel(inputBatch)
+    pred_vals = trainedModel(inputBatch, training=False)
     true_vals = targetBatch["out_matrixData"]
     loss = lossFn(true_vals, pred_vals)
     return loss
