@@ -240,6 +240,29 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
     #takes a matrix as numpy array or sparse matrix and writes a cooler matrix from it
     #modified from study project such that multiple chroms can be written to a single matrix
 
+    def pixelGenerator(pMatrixList, pOffsetList):
+        '''
+        yields pixel dataframes per Matrix
+        Parameters:
+        pMatrixList: list of matrices as np.ndarray or sparse.csr_matrix
+        pOffsetList: list of integers that specify the offset into the bins dataframe
+
+        Yields:
+        pixels: pixels dataframe for all Hi-C matrices in the input list
+        '''
+        for matrix, offset in zip(pMatrixList, pOffsetList):
+            #create the pixels for cooler
+            triu_Indices = np.triu_indices(matrix.shape[0])
+            pixels_tmp = pd.DataFrame(columns=['bin1_id','bin2_id','count'])
+            pixels_tmp['bin1_id'] = (triu_Indices[0] + offset).astype("uint32")
+            pixels_tmp['bin2_id'] = (triu_Indices[1] + offset).astype("uint32")
+            readCounts = matrix[triu_Indices]
+            if sparse.isspmatrix_csr(matrix): #for sparse matrices, slicing is different
+                readCounts = np.transpose(readCounts)
+            pixels_tmp['count'] = np.float64(readCounts)
+            pixels_tmp.sort_values(by=['bin1_id','bin2_id'],inplace=True)
+            yield pixels_tmp
+
     if pMatrixList is None or pChromosomeList is None or pBinSizeInt is None or pOutfile is None:
         msg = "input empty. No cooler matrix written"
         print(msg)
@@ -253,8 +276,8 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
         print(msg)
         return
     bins = pd.DataFrame(columns=['chrom','start','end'])
-    pixels = pd.DataFrame(columns=['bin1_id','bin2_id','count']) 
     
+    offsetList = [0]
     for i, (matrix, chrom) in enumerate(zip(pMatrixList,pChromosomeList)):
         #the chromosome size may not be integer-divisible by the bin size
         #so specifying the real chrom size is possible, but the
@@ -265,9 +288,6 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
                 and pChromSizeList[i] > (chromSizeInt - pBinSizeInt)\
                 and pChromSizeList[i] < chromSizeInt:
             chromSizeInt = int(pChromSizeList[0])
-        
-        #store offset for later
-        offset = bins.shape[0]
 
         #create the bins for cooler
         bins_tmp = pd.DataFrame(columns=['chrom','start','end'])
@@ -278,28 +298,14 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
         bins_tmp['end'] = np.uint32(binEndList)
         bins_tmp["chrom"] = str(chrom)
         bins = bins.append(bins_tmp, ignore_index=True)
-
-        #create the pixels for cooler
-        triu_Indices = np.triu_indices(matrix.shape[0])
-        pixels_tmp = pd.DataFrame(columns=['bin1_id','bin2_id','count'])
-        pixels_tmp['bin1_id'] = (triu_Indices[0] + offset).astype("uint32")
-        pixels_tmp['bin2_id'] = (triu_Indices[1] + offset).astype("uint32")
-        readCounts = matrix[triu_Indices]
-        if sparse.isspmatrix_csr(matrix): #for sparse matrices, slicing is different
-            readCounts = np.transpose(readCounts)
-        pixels_tmp['count'] = np.float64(readCounts)
-        pixels = pixels.append(pixels_tmp, ignore_index=True)
-
-    #convert the data types
-    pixels["bin1_id"] = pixels["bin1_id"].astype("uint32")
-    pixels["bin2_id"] = pixels["bin2_id"].astype("uint32")
+        offsetList.append(offsetList[-1] + bins_tmp.shape[0])
+    #correct dtypes for joint dataframe
     bins["start"] = bins["start"].astype("uint32")
     bins["end"] = bins["end"].astype("uint32")
-
-    pixels.sort_values(by=['bin1_id','bin2_id'],inplace=True)
+    offsetList = offsetList[:-1] #don't need the last one, no more matrix to follow
 
     #write out the cooler
-    cooler.create_cooler(pOutfile, bins=bins, pixels=pixels, dtypes={'count': np.float64}, ordered=True, metadata=pMetadata)
+    cooler.create_cooler(pOutfile, bins=bins, pixels=pixelGenerator(pMatrixList=pMatrixList, pOffsetList=offsetList), dtypes={'count': np.float64}, ordered=True, metadata=pMetadata)
 
 def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     #compute the means along the diagonals (= same distance)
