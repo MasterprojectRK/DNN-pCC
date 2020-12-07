@@ -405,6 +405,13 @@ def training(trainmatrices,
             utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
                     pNameList=["train", "validation"],
                     pFilename=lossPlotFilename)
+            #save the loss values so that they can be plotted again in different formats later on
+            valLossFilename = "val_loss_{:05d}.npy".format(epoch + 1)
+            trainLossFilename = "train_loss_{:05d}.npy".format(epoch + 1)
+            valLossFilename = os.path.join(outputpath, valLossFilename)
+            trainLossFilename = os.path.join(outputpath, trainLossFilename)
+            np.save(valLossFilename, valLossList_epochs)
+            np.save(trainLossFilename, trainLossList_epochs)
         if (epoch + 1) % 5 == 0:
             msg = "epoch {:d} - val. loss {:.3f}".format(epoch+1, valLossList_epochs[-1])
             print(msg)
