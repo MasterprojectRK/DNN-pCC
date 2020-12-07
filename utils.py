@@ -177,7 +177,7 @@ def plotLoss(pLossValueLists, pNameList, pFilename):
         locVal = 1000
     ax1.xaxis.set_major_locator(MultipleLocator(locVal))
     ax1.grid(True, which="both")
-    ax1.legend(pNameList, loc='upper left')
+    ax1.legend(pNameList, loc='upper right')
     fig1.savefig(pFilename)
 
 def rebuildMatrix(pArrayOfTriangles, pWindowSize, pFlankingSize=None, pMaxDist=None, pStepsize=1):
