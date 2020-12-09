@@ -1,8 +1,6 @@
 import tensorflow as tf
 import numpy as np
 
-#compare following tutorial https://medium.com/@moritzkrger/speeding-up-keras-with-tfrecord-datasets-5464f9836c36
-
 #parse serialized input to tensors
 def parse_function(example_proto, descriptionDict):
     featDict = dict()

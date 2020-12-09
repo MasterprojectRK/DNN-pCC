@@ -259,14 +259,7 @@ def training(trainmatrices,
             container.plotFeatureAtIndex(idx=idx,
                                          outpath=outputpath,
                                          figuretype=figuretype)
-            container.saveMatrix(outputpath=outputpath,
-                                 index=idx)
-            if isinstance(container, dataContainer.DataContainerWithScores):
-                container.plotInsulationScore(outpath=outputpath, 
-                                              figuretype=figuretype, 
-                                              index=idx)
-                container.saveInsulationScoreToBedgraph(outpath=outputpath,
-                                                    index=idx)
+            container.saveMatrix(outputpath=outputpath, index=idx)
         nr_samples_list.append(container.getNumberSamples())
         container.unloadData()
     traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]

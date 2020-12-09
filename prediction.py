@@ -107,7 +107,7 @@ def prediction(validationmatrix,
         msg = "Could not load trained model {:s} - Wrong file or format?"
         msg = msg.format(trainedmodel)
         raise SystemExit(msg)
-
+    #check if a DNA sequence data is required as model input
     if modelType == "sequence" and sequencefile is None:
         msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
         raise SystemExit(msg)
@@ -115,7 +115,6 @@ def prediction(validationmatrix,
     #extract chromosome names from the input
     chromNameList = chromosome.replace(",", " ").rstrip().split(" ")  
     chromNameList = sorted([x.lstrip("chr") for x in chromNameList])
-
     containerCls = dataContainer.DataContainer
     testdataContainerList = []
     for chrom in chromNameList:
@@ -156,7 +155,7 @@ def prediction(validationmatrix,
         msg += "\n".join(container0.factorNames)
         raise SystemExit(msg)
     
-    #build the TFData for prediction
+    #build the TFData input stream for prediction
     storedFeaturesDict = container0.storedFeatures
     testDs = tf.data.TFRecordDataset(tfRecordFilenames, 
                                         num_parallel_reads=None,
@@ -174,7 +173,6 @@ def prediction(validationmatrix,
         for i in range(predBatch.shape[0]):
             predList.append(predBatch[i])        
     predMatrixArray = np.array(predList)
-    
     #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
@@ -184,30 +182,10 @@ def prediction(validationmatrix,
         msg = "Aborting. Failed separating prediction into single chromosomes"
         raise SystemExit(msg)
     #now split the prediction up into arrays of submatrices for each chromosome
-    #scale predicted submatrices to 0...1
     indicesList = [sum(chrLengthList[0:i]) for i in range(len(chrLengthList)+1)]
     matrixPerChromList = []
     for i,j in zip(indicesList, indicesList[1:]):
-        #matrixPerChromList.append( utils.scaleArray(predMatrixArray[i:j,:]) * multiplier)
         matrixPerChromList.append(predMatrixArray[i:j,:])
-
-    #in case we need scores, compute them, too
-    # if includeScore:
-    #     scorePerChromList = [utils.rebuildScore(pArrayOfTriangles=elem, 
-    #                                             pWindowsize=windowsize,
-    #                                             pFlankingsize=flankingsize,
-    #                                             pScoresize=scoreSize) for elem in matrixPerChromList]
-    #     for chromname, score in zip(chromNameList, scorePerChromList):
-    #         filename = "scorePrediction_chr{:s}_ds{:d}.bedgraph".format(chromname, scoreSize)
-    #         filename = os.path.join(outputpath, filename)
-    #         utils.saveInsulationScoreToBedgraph(scoreArray=score, 
-    #                                             chromSize_matrix=(score.shape[0] + 2*scoreSize)*binSizeInt, 
-    #                                             binsize=binSizeInt, 
-    #                                             diamondsize=scoreSize, 
-    #                                             chromosome=chromname, 
-    #                                             filename=filename, 
-    #                                             startbin=0)
-
     #rebuild the matrices from the overlapping 
     #submatrices for each chromosome
     for i, matrix in enumerate(matrixPerChromList):
@@ -217,7 +195,7 @@ def prediction(validationmatrix,
                                                     pMaxDist=maxdist )
     #scale the re-assembled matrices into range [0..multiplier]
     matrixPerChromList = [utils.scaleArray(matrix) * multiplier for matrix in matrixPerChromList]
-    #write cooler matrices to disk
+    #write predicted chromosomes into a single cooler file
     coolerMatrixName = os.path.join(outputpath, "predMatrix.cool")
     metadata = {"trainParams": trainParamDict, "predParams": predParamDict}
     utils.writeCooler(pMatrixList=matrixPerChromList,
@@ -225,7 +203,7 @@ def prediction(validationmatrix,
                      pOutfile=coolerMatrixName,
                      pChromosomeList=chromNameList,
                      pMetadata=metadata)
-    
+    #compute scores, if scores were used during the training process
     if scoreWeight > 0.0 and isinstance(scoreSize, int):
         bedgraphFileName = "scorePrediction_ds{:d}.bedgraph".format(scoreSize)            
         bedgraphFileName = os.path.join(outputpath, bedgraphFileName)
@@ -247,24 +225,25 @@ def prediction(validationmatrix,
         evalDs = evalDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
         evalDs = evalDs.batch(batchSizeInt)
         evalDs = evalDs.prefetch(tf.data.experimental.AUTOTUNE)
-        
+        #compute loss for all samples
         lossList = []
         for x,y in evalDs:
             loss = evalStep(trainedModel, x, y)
             lossList.append(loss)
+        #(approximately) split loss per chromosomes
         batchIndexList = [int(np.ceil(i/batchSizeInt)) for i in indicesList]
         lossPerChromList = [np.mean(lossList[i:j]) for i, j in zip(batchIndexList, batchIndexList[1:])]
         chromLossStrList = ["Chrom {:s}: {:.3f}".format(chrom, loss) for chrom, loss in zip(chromNameList, lossPerChromList)] 
         msg = "Mean loss(es):\n{:s}".format("\n".join(chromLossStrList))
         print(msg)
-
-    #store results
+    
+    #store prediction parameters
     parameterFile = os.path.join(outputpath, "predParams.csv")    
     with open(parameterFile, "w") as csvfile:
         dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(predParamDict.keys())))
         dictWriter.writeheader()
         dictWriter.writerow(predParamDict)
-    
+    #remove TFRecords (they can be large files)
     for record in tqdm(tfRecordFilenames, "removing TFRecords"):
         if os.path.exists(record):
             os.remove(record)
