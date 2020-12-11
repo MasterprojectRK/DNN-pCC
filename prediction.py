@@ -91,7 +91,7 @@ def prediction(validationmatrix,
     #score was not used previously
     try:
         scoreSize = int(trainParamDict["scoresize"])
-        scoreWeight = int(trainParamDict["scoreweight"])    
+        scoreWeight = float(trainParamDict["scoreweight"])    
     except:
         scoreSize = None
         scoreWeight = 0.0
