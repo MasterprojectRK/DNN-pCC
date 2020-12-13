@@ -405,9 +405,7 @@ def training(trainmatrices,
             trainLossFilename = os.path.join(outputpath, trainLossFilename)
             np.save(valLossFilename, valLossList_epochs)
             np.save(trainLossFilename, trainLossList_epochs)
-        if (epoch + 1) % 5 == 0:
-            msg = "epoch {:d} - val. loss {:.3f}".format(epoch+1, valLossList_epochs[-1])
-            print(msg)
+            del valLossFilename, trainLossFilename
 
     weights_after = model.layers[1].weights[0].numpy()
     print("weight sum before", np.sum(weights_before))
