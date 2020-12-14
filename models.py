@@ -150,10 +150,10 @@ class ConversionModel():
         x = tf.keras.layers.Add(name="make_symmetric_layer")([x,y,z])
         #scale the outputs to 0...1
         #find the maximum of each sample in the batch and multiply by its inverse
-        factor = tf.keras.layers.Lambda( lambda x1: tf.reduce_max(x1, axis=1), name="row_max_layer" )(x) #row. max for all samples
-        factor = tf.keras.layers.Lambda( lambda x1: tf.reduce_max(x1, axis=1), name="global_max_layer")(factor) #global max for all samples
-        factor = tf.keras.layers.Lambda( lambda x1: tf.cast(1./x1, tf.float32), name="max_division_layer")(factor) #the inverse for multiplication
-        x = tf.keras.layers.Multiply(name="zero_one_scaling_layer")([x, factor])
+        #factor = tf.keras.layers.Lambda( lambda x1: tf.reduce_max(x1, axis=1), name="row_max_layer" )(x) #row. max for all samples
+        #factor = tf.keras.layers.Lambda( lambda x1: tf.reduce_max(x1, axis=1), name="global_max_layer")(factor) #global max for all samples
+        #factor = tf.keras.layers.Lambda( lambda x1: tf.cast(1./x1, tf.float32), name="max_division_layer")(factor) #the inverse for multiplication
+        #x = tf.keras.layers.Multiply(name="zero_one_scaling_layer")([x, factor])
         #make the output a grayscale image
         x = tf.keras.layers.Reshape((self.windowsize, self.windowsize, 1))(x)
         
@@ -247,24 +247,6 @@ class ConversionModel():
         z = tf.keras.layers.Lambda(lambda x1: -1*tf.linalg.band_part(x1, 0, 0))(x)
         x = tf.keras.layers.Add()([x, y, z])
         x = tf.keras.layers.Reshape((self.windowsize, self.windowsize, 1))(x)
-        x = tf.keras.layers.Conv2D(filters=16,kernel_size=4,padding="same")(x)
-        x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=8,kernel_size=4,padding="same")(x)
-        x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=4,kernel_size=4,padding="same")(x)
-        x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=2,kernel_size=4,padding="same")(x)
-        x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=1,kernel_size=4,padding="same")(x)
-        x = tf.keras.layers.BatchNormalization()(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        y = tf.keras.layers.Permute((2,1,3))(x)
-        z = tf.keras.layers.Lambda(lambda x1: -1*tf.linalg.band_part(x1, 0, 0))(x)
-        x = tf.keras.layers.Add()([x,y,z])
         model = tf.keras.Model(inputs=inputs, outputs=x)
         return model
 
@@ -328,13 +310,17 @@ class ConversionModel():
         #lists to store loss for each epoch
         trainLossList_epochs = [] 
         valLossList_epochs = []
+        a = list(train_ds.take(1).as_numpy_iterator())
+        b = list(validation_ds.take(1).as_numpy_iterator())
+        train_before = self.model(a[0][0], training=False)
+        val_before = self.model(b[0][0], training=False)
+        mse_before = tf.reduce_mean(tf.square(train_before-val_before))
         #iterate over all epochs and batches in the train/validation datasets
         #compute gradients and update weights accordingly
         for epoch in range(nr_epochs):
             if epoch % 5 == 0:
-                for example_input, example_target in validation_ds.take(1):
-                    self.generate_images(example_input, example_target, epoch)
-            
+                self.generate_images(b[0][0], b[0][1], epoch, name_prefix="validation_")
+                self.generate_images(a[0][0], a[0][1], epoch, name_prefix="training_")
             train_pbar = tqdm(train_ds, total=steps_per_epoch)
             train_pbar.set_description("Epoch {:05d}".format(epoch+1))
             trainLossList_batches = [] #lists to store loss for each batch
@@ -378,7 +364,15 @@ class ConversionModel():
         utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
                         pNameList=["train", "validation"],
                         pFilename=lossPlotFilename)
-
+        train_after = self.model(a[0][0], training=False)
+        val_after = self.model(b[0][0], training=False)
+        mse_after = tf.reduce_mean(tf.square(train_after, val_after))
+        msg = "inter mse before: {:.5f} -- inter mse after: {:.5f}".format(mse_before, mse_after)
+        print(msg)
+        same_mse_train = tf.reduce_mean(tf.square(train_before, train_after))
+        same_mse_val = tf.reduce_mean(tf.square(val_before, val_after))
+        msg = "same mse train: {:.5f} -- same mse val: {:.5f}".format(same_mse_train, same_mse_val)
+        print(msg)
     def predict(self, test_ds, trained_model_filepath: str = ""):
         trainedModel = self.model
         if trained_model_filepath != "":
@@ -399,17 +393,20 @@ class ConversionModel():
         #self.model._layers = [layer for layer in self.model._layers if isinstance(layer, tf.keras.layers.Layer)] #workaround for plotting with custom loss functions
         tf.keras.utils.plot_model(self.model, show_shapes=True, to_file=modelPlotName)
 
-    def generate_images(self, test_input, target, epoch: int):
+    def generate_images(self, test_input, target, epoch: int, name_prefix: str = ""):
         prediction = self.model(test_input, training=False)
+        pred0 = prediction[0].numpy()
+        np.save(os.path.join(self.outfolder, "pred{:05d}".format(epoch) + name_prefix + ".npy"), pred0)
         mse = tf.reduce_mean(tf.square(prediction[0] - target["out_matrixData"][0]))
-        figname = "testpred_epoch_{:05d}.{:s}".format(epoch, self.figure_type)
+        figname = name_prefix + "pred_epoch_{:05d}.{:s}".format(epoch, self.figure_type)
         figname = os.path.join(self.outfolder, figname)
         display_list = [test_input["factorData"][0], target["out_matrixData"][0], prediction[0]]
         titleList = ['Input Image', 'Ground Truth', 'Predicted Image (MSE: {:.4f})'.format(mse)]
         fig1, axs1 = plt.subplots(1,len(display_list), figsize=(15,15))
         for i in range(len(display_list)):
-            axs1[i].imshow(display_list[i] * 0.5 + 0.5)
+            axs1[i].imshow(display_list[i])
             axs1[i].set_title(titleList[i])
+        fig1.suptitle(name_prefix + "{:05d}".format(epoch))
         fig1.savefig(figname)
         plt.close(fig1)
         del fig1, axs1

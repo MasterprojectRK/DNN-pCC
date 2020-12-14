@@ -357,7 +357,7 @@ class DataContainer():
         else: #triangles, i. e. full submatrices
             trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()
         trainmatrix = np.array(np.nan_to_num(trainmatrix)).astype("float32")
-        trainmatrix = utils.scaleArray(trainmatrix)
+        #trainmatrix = utils.scaleArray(trainmatrix)
         trainmatrix = np.expand_dims(trainmatrix, axis=-1) #make it a grayscale image
         return trainmatrix
     
