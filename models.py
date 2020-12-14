@@ -401,10 +401,11 @@ class ConversionModel():
 
     def generate_images(self, test_input, target, epoch: int):
         prediction = self.model(test_input, training=False)
+        mse = tf.reduce_mean(tf.square(prediction[0] - target["out_matrixData"][0]))
         figname = "testpred_epoch_{:05d}.{:s}".format(epoch, self.figure_type)
         figname = os.path.join(self.outfolder, figname)
         display_list = [test_input["factorData"][0], target["out_matrixData"][0], prediction[0]]
-        titleList = ['Input Image', 'Ground Truth', 'Predicted Image']
+        titleList = ['Input Image', 'Ground Truth', 'Predicted Image (MSE: {:.4f})'.format(mse)]
         fig1, axs1 = plt.subplots(1,len(display_list), figsize=(15,15))
         for i in range(len(display_list)):
             axs1[i].imshow(display_list[i] * 0.5 + 0.5)
