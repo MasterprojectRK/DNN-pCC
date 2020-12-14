@@ -78,6 +78,8 @@ class ConversionModel():
             kernelSizeList= [6,6]
             nrNeuronsList = [1500,2400]
             sequentialModel = True
+        elif self.model_type == "crazy":
+            return self.__buildCrazyModel()
         
         if sequentialModel == True:
             return self.__buildSequentialModel(
@@ -223,6 +225,49 @@ class ConversionModel():
     
         finalModel = Model(inputs=[model1.input, model2.input], outputs=x)
         return finalModel
+
+    def __buildCrazyModel(self, nr_filters_list=[16,16,32,32,64], kernel_width_list=[4,4,4,4,4], nr_neurons_List=[5000,4000,3000]):  
+        inputs = tf.keras.layers.Input(shape=(3*self.windowsize, self.nr_factors), name="factorData")
+        #add 1D convolutions
+        x = inputs
+        for i, (nr_filters, kernelWidth) in enumerate(zip(nr_filters_list, kernel_width_list)):
+            convParamDict = dict()
+            convParamDict["name"] = "conv1D_" + str(i + 1)
+            convParamDict["filters"] = nr_filters
+            convParamDict["kernel_size"] = kernelWidth
+            convParamDict["data_format"]="channels_last"
+            if kernelWidth > 1:
+                convParamDict["padding"] = "same"
+            x = Conv1D(**convParamDict)(x)
+            x = tf.keras.layers.BatchNormalization()(x)
+            x = tf.keras.layers.Activation("sigmoid")(x)
+        #make the shape of a 2D-image
+        x = Conv1D(filters=64, strides=3, kernel_size=4, data_format="channels_last", activation="sigmoid", padding="same", name="conv1D_final")(x)
+        y = tf.keras.layers.Permute((2,1))(x)
+        z = tf.keras.layers.Lambda(lambda x1: -1*tf.linalg.band_part(x1, 0, 0))(x)
+        x = tf.keras.layers.Add()([x, y, z])
+        x = tf.keras.layers.Reshape((self.windowsize, self.windowsize, 1))(x)
+        x = tf.keras.layers.Conv2D(filters=16,kernel_size=4,padding="same")(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=8,kernel_size=4,padding="same")(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=4,kernel_size=4,padding="same")(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=2,kernel_size=4,padding="same")(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=1,kernel_size=4,padding="same")(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        y = tf.keras.layers.Permute((2,1,3))(x)
+        z = tf.keras.layers.Lambda(lambda x1: -1*tf.linalg.band_part(x1, 0, 0))(x)
+        x = tf.keras.layers.Add()([x,y,z])
+        model = tf.keras.Model(inputs=inputs, outputs=x)
+        return model
+
 
     def lossFunction(self, predicted, target):
         loss = 0.0
