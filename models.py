@@ -4,190 +4,405 @@ from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras import Input
 from tensorflow.keras.applications import vgg16
 import numpy as np
-import threading 
+import os 
 import utils
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
-def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None):
-    flankingsize = None
-    maxdist = None
-    if pFlankingSize is None:
-        flankingsize = pWindowSize
-    else:
-        flankingsize = pFlankingSize
-    if pMaxDist is None:
-        maxdist = pWindowSize
-    else:
-        maxdist = min(pWindowSize, pMaxDist)
-    sequentialModel = False
-    nrFiltersList = []
-    kernelSizeList = []
-    nrNeuronsList = []
-    dropoutRate = 0.5
-    if pModelTypeStr == "initial":
-        #original model by Farre et al
-        #See publication "Dense neural networks for predicting chromatin conformation" (https://doi.org/10.1186/s12859-018-2286-z).
-        nrFiltersList = [1]
-        kernelSizeList = [1]
-        nrNeuronsList = [460,881,1690]
-        sequentialModel = True
-        dropoutRate = 0.1
-    elif pModelTypeStr == "wider":
-        #test model with wider filters
-        nrFiltersList = [1]
-        kernelSizeList = [6]
-        nrNeuronsList = [460,881,1690]
-        sequentialModel = True
-    elif pModelTypeStr == "longer":
-        #test model with more convolution filters
-        nrFiltersList = [6,6]
-        kernelSizeList= [1,1]
-        nrNeuronsList = [1500,2400]
-        sequentialModel = True
-    elif pModelTypeStr == "wider-longer":
-        #test model with more AND wider convolution filters
-        nrFiltersList = [6,6]
-        kernelSizeList= [6,6]
-        nrNeuronsList = [1500,2400]
-        sequentialModel = True
+class ConversionModel():
+    def __init__(self, optimizer: str, learning_rate: float, 
+                windowsize: int, flankingsize: int, nr_factors: int, 
+                model_type: str, binsize: int = 0,
+                nr_symbols: int = 0,
+                tv_weight: float = 0.0, ssim_loss_weight: float = 0.0, 
+                pixel_loss_weight: float = 1.0, score_loss_weight: float = 0.0,
+                perception_loss_weight: float = 0.0,
+                pixel_loss_function: str = "MSE",
+                outfolder: str = "./",
+                figure_type: str = "png"):
+        self.optimizer = ConversionModel.getOptimizer(optimizer, learning_rate)
+        self.windowsize = windowsize
+        self.flankingsize = flankingsize
+        self.nr_factors = nr_factors
+        self.model_type = model_type
+        self.binsize = binsize
+        self.nr_symbols = nr_symbols
+        self.tv_weight = tv_weight
+        self.ssim_loss_weight = ssim_loss_weight
+        self.maxfiltersize = 5
+        self.score_loss_weight = score_loss_weight
+        self.perception_loss_weight = perception_loss_weight
+        self.pixel_loss_weight = pixel_loss_weight
+        self.perception_model = None
+        if self.perception_loss_weight > 0.0:
+            self.perception_model = self.getPerceptionModel()
+        self.pixel_loss_fn = ConversionModel.getPerPixelLoss(pixel_loss_function)
+        self.model = self.buildModel()
+        self.outfolder = outfolder
+        self.figure_type = figure_type
+
+    def buildModel(self, pMaxDist=None):
+        if pMaxDist is None:
+            maxdist = self.windowsize
+        else:
+            maxdist = min(self.windowsize, pMaxDist)
+        sequentialModel = False
+        nrFiltersList = []
+        kernelSizeList = []
+        nrNeuronsList = []
+        dropoutRate = 0.5
+        if self.model_type == "initial":
+            #original model by Farre et al
+            #See publication "Dense neural networks for predicting chromatin conformation" (https://doi.org/10.1186/s12859-018-2286-z).
+            nrFiltersList = [1]
+            kernelSizeList = [1]
+            nrNeuronsList = [460,881,1690]
+            sequentialModel = True
+            dropoutRate = 0.1
+        elif self.model_type == "wider":
+            #test model with wider filters
+            nrFiltersList = [1]
+            kernelSizeList = [6]
+            nrNeuronsList = [460,881,1690]
+            sequentialModel = True
+        elif self.model_type == "longer":
+            #test model with more convolution filters
+            nrFiltersList = [6,6]
+            kernelSizeList= [1,1]
+            nrNeuronsList = [1500,2400]
+            sequentialModel = True
+        elif self.model_type == "wider-longer":
+            #test model with more AND wider convolution filters
+            nrFiltersList = [6,6]
+            kernelSizeList= [6,6]
+            nrNeuronsList = [1500,2400]
+            sequentialModel = True
+        
+        if sequentialModel == True:
+            return self.__buildSequentialModel(
+                                        pMaxDist=maxdist,
+                                        pNrFiltersList=nrFiltersList,
+                                        pKernelWidthList=kernelSizeList,
+                                        pNrNeuronsList=nrNeuronsList,
+                                        pDropoutRate=dropoutRate)
+        elif sequentialModel == False and self.model_type == "sequence":
+            return self.__buildSequenceModel(pMaxDist=maxdist, pDropoutRate=dropoutRate)
+        else:
+            msg = "Aborting. This type of model is not supported (yet)."
+            raise NotImplementedError(msg)
+
+    def __buildSequentialModel(self, pMaxDist, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate):
+        msg = ""
+        if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
+            msg += "No. of filters must be a list\n"
+        if pKernelWidthList is None or not isinstance(pKernelWidthList, list):
+            msg += "Kernel widths must be a list\n"
+        if pNrNeuronsList is None or not isinstance(pNrNeuronsList, list):
+            msg += "No. of neurons must be a list\n"
+        if msg != "":
+            print(msg)
+            return None
+        if len(pNrFiltersList) != len(pKernelWidthList) or len(pNrFiltersList) < 1:
+            msg = "kernel widths and no. of filters must be specified for all 1Dconv. layers (min. 1 layer)"
+            print(msg)
+            return None
+        if pDropoutRate <= 0 or pDropoutRate >= 1: 
+            msg = "dropout must be in (0..1)"
+            print(msg)
+            return None
+        inputs = Input(shape=(2*self.flankingsize+self.windowsize,self.nr_factors), name="factorData")
+        x = inputs
+        #add the requested number of 1D convolutions
+        for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
+            convParamDict = dict()
+            convParamDict["name"] = "conv1D_" + str(i + 1)
+            convParamDict["filters"] = nr_filters
+            convParamDict["kernel_size"] = kernelWidth
+            convParamDict["activation"] = "sigmoid"
+            convParamDict["data_format"]="channels_last"
+            if kernelWidth > 1:
+                convParamDict["padding"] = "same"
+            x = Conv1D(**convParamDict)(x)
+        #flatten the output from the convolutions
+        x = Flatten(name="flatten_1")(x)
+        #add the requested number of dense layers and dropout
+        for i, nr_neurons in enumerate(pNrNeuronsList):
+            layerName = "dense_" + str(i+1)
+            x = Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName)(x)
+            layerName = "dropout_" + str(i+1)
+            x = Dropout(pDropoutRate, name=layerName)(x)
+        #add the output layer (corresponding to a predicted submatrix, 
+        #here only the upper triangular part, along the diagonal of a Hi-C matrix)
+        #this matrix may additionally be capped to maxDist, so that a trapezoid remains
+        diff = self.windowsize - pMaxDist
+        nr_elements_fullMatrix = int( 1/2 * self.windowsize * (self.windowsize + 1) ) #always an int, even*odd=even 
+        nr_elements_capped = int( 1/2 * diff * (diff+1) )   
+        nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
+        x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
+        #make the output a symmetric matrix
+        #i.e. add the transpose and subtract the diagonal (since it appears both)
+        x = CustomReshapeLayer(self.windowsize, name="upper_triangular_layer")(x)
+        y = tf.keras.layers.Lambda(lambda x1: -1 * tf.linalg.band_part(x1, 0, 0), name="get_diagonal_layer")(x)
+        z = tf.keras.layers.Permute((2,1), name="transpose_layer")(x)
+        x = tf.keras.layers.Add(name="make_symmetric_layer")([x,y,z])
+        #scale the outputs to 0...1
+        #find the maximum of each sample in the batch and multiply by its inverse
+        factor = tf.keras.layers.Lambda( lambda x1: tf.reduce_max(x1, axis=1), name="row_max_layer" )(x) #row. max for all samples
+        factor = tf.keras.layers.Lambda( lambda x1: tf.reduce_max(x1, axis=1), name="global_max_layer")(factor) #global max for all samples
+        factor = tf.keras.layers.Lambda( lambda x1: tf.cast(1./x1, tf.float32), name="max_division_layer")(factor) #the inverse for multiplication
+        x = tf.keras.layers.Multiply(name="zero_one_scaling_layer")([x, factor])
+        #make the output a grayscale image
+        x = tf.keras.layers.Reshape((self.windowsize, self.windowsize, 1))(x)
+        
+        model = Model(inputs=inputs, outputs=x)
+        return model
+
+    def __buildSequenceModel(self, pMaxDist, pDropoutRate):
+        #consists of two subnets for chromatin factors and sequence, respectively
+        #output neurons, see above for explanation
+        diff = self.windowsize - pMaxDist
+        nr_elements_fullMatrix = int( 1/2 * self.windowsize * (self.windowsize + 1) ) #always an int, even*odd=even 
+        nr_elements_capped = int( 1/2 * diff * (diff+1) )   
+        out_neurons = nr_elements_fullMatrix - nr_elements_capped
+        #model for chromatin factors first
+        kernelWidth = 1
+        nr_neurons1 = 460
+        nr_neurons2 = 881
+        nr_neurons3 = 1690
+        model1 = Sequential()
+        model1.add(Input(shape=(2*self.flankingsize + self.windowsize, self.nr_factors), name="factorData"))
+        model1.add(Conv1D(filters=1, 
+                        kernel_size=kernelWidth, 
+                        activation="sigmoid",
+                        data_format="channels_last"))
+        model1.add(Flatten())
+        model1.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
+        model1.add(Dropout(pDropoutRate))
+        model1.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2"))
+        model1.add(Dropout(pDropoutRate))
+        model1.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
+        model1.add(Dropout(pDropoutRate))
+        
+        #CNN model for sequence
+        filters1 = 5
+        maxpool1 = 5
+        kernelSize1 = 6
+        kernelSize2 = 10
+        model2 = Sequential()
+        model2.add(Input(shape=(self.windowsize*self.binsize,self.nr_symbols), name="sequenceData"))
+        model2.add(Conv1D(filters=filters1, 
+                        kernel_size=kernelSize1,
+                        activation="relu",
+                        data_format="channels_last"))
+        model2.add(MaxPool1D(maxpool1))
+        model2.add(Conv1D(filters=filters1,
+                        kernel_size=kernelSize1,
+                        activation="relu",
+                        data_format="channels_last"))
+        model2.add(MaxPool1D(maxpool1))
+        model2.add(Conv1D(filters=filters1,
+                        kernel_size=kernelSize2,
+                        activation="relu",
+                        data_format="channels_last"))
+        model2.add(MaxPool1D(maxpool1))
+        model2.add(Conv1D(filters=filters1,
+                        kernel_size=kernelSize2,
+                        activation="relu",
+                        data_format="channels_last"))
+        model2.add(MaxPool1D(maxpool1))
+        model2.add(Conv1D(filters=filters1,
+                        kernel_size=kernelSize2,
+                        activation="relu",
+                        data_format="channels_last"))                              
+        model2.add(Flatten())
+        model2.add(Dense(nr_neurons2, activation="relu",kernel_regularizer="l2"))
+        model2.add(Dropout(pDropoutRate))
+        combined = Concatenate()([model1.output,model2.output])
+        x = Dense(out_neurons,activation="relu",kernel_regularizer="l2")(combined)
     
-    if sequentialModel == True:
-        return buildSequentialModel(pWindowSize=pWindowSize,
-                                    pFlankingSize=flankingsize,
-                                    pMaxDist=maxdist,
-                                    pNrFactors=pNrFactors,
-                                    pNrFiltersList=nrFiltersList,
-                                    pKernelWidthList=kernelSizeList,
-                                    pNrNeuronsList=nrNeuronsList,
-                                    pDropoutRate=dropoutRate)
-    elif sequentialModel == False and pModelTypeStr == "sequence":
-        return buildSequenceModel(pWindowSize=pWindowSize,
-                                  pFlankingSize=flankingsize,
-                                  pMaxDist=maxdist, 
-                                  pNrFactors=pNrFactors, 
-                                  pBinSizeInt=pBinSizeInt, 
-                                  pNrSymbols=pNrSymbols,
-                                  pDropoutRate=dropoutRate)
-    else:
-        msg = "Aborting. This type of model is not supported (yet)."
-        raise NotImplementedError(msg)
+        finalModel = Model(inputs=[model1.input, model2.input], outputs=x)
+        return finalModel
 
-def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate):
-    msg = ""
-    if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
-        msg += "No. of filters must be a list\n"
-    if pKernelWidthList is None or not isinstance(pKernelWidthList, list):
-        msg += "Kernel widths must be a list\n"
-    if pNrNeuronsList is None or not isinstance(pNrNeuronsList, list):
-        msg += "No. of neurons must be a list\n"
-    if msg != "":
-        print(msg)
-        return None
-    if len(pNrFiltersList) != len(pKernelWidthList) or len(pNrFiltersList) < 1:
-        msg = "kernel widths and no. of filters must be specified for all 1Dconv. layers (min. 1 layer)"
-        print(msg)
-        return None
-    if pDropoutRate <= 0 or pDropoutRate >= 1: 
-        msg = "dropout must be in (0..1)"
-        print(msg)
-        return None
-    inputs = Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="factorData")
-    x = inputs
-    #add the requested number of 1D convolutions
-    for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
-        convParamDict = dict()
-        convParamDict["name"] = "conv1D_" + str(i + 1)
-        convParamDict["filters"] = nr_filters
-        convParamDict["kernel_size"] = kernelWidth
-        convParamDict["activation"] = "sigmoid"
-        convParamDict["data_format"]="channels_last"
-        if kernelWidth > 1:
-            convParamDict["padding"] = "same"
-        x = Conv1D(**convParamDict)(x)
-    #flatten the output from the convolutions
-    x = Flatten(name="flatten_1")(x)
-    #add the requested number of dense layers and dropout
-    for i, nr_neurons in enumerate(pNrNeuronsList):
-        layerName = "dense_" + str(i+1)
-        x = Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName)(x)
-        layerName = "dropout_" + str(i+1)
-        x = Dropout(pDropoutRate, name=layerName)(x)
-    #add the output layer (corresponding to a predicted submatrix, 
-    #here only the upper triangular part, along the diagonal of a Hi-C matrix)
-    #this matrix may additionally be capped to maxDist, so that a trapezoid remains
-    diff = pWindowSize - pMaxDist
-    nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
-    nr_elements_capped = int( 1/2 * diff * (diff+1) )   
-    nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
-    x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
-    model = Model(inputs=inputs, outputs=x)
-    return model
+    def lossFunction(self, predicted, target):
+        loss = 0.0
+        if self.pixel_loss_weight > 0.0:
+            pixel_loss = self.pixel_loss_fn(target, predicted)
+            loss += pixel_loss * self.pixel_loss_weight
+        if self.tv_weight > 0.0:
+            tv_loss = tf.reduce_mean(tf.image.total_variation(predicted))
+            loss += tv_loss * self.tv_weight
+        if self.ssim_loss_weight > 0.0:
+            ssim_loss = 1 - tf.reduce_mean(tf.image.ssim(target, predicted, 1., filter_size=self.maxfiltersize))
+            loss += ssim_loss * self.ssim_loss_weight
+        if self.perception_loss_weight > 0.0:
+            target_rgb = tf.image.grayscale_to_rgb(target)
+            predicted_rgb = tf.image.grayscale_to_rgb(predicted)
+            target_activations = self.perception_model(target_rgb)
+            predicted_activations = self.perception_model(predicted_rgb)
+            perception_loss = tf.reduce_mean(tf.square( target_activations - predicted_activations ))
+            loss += perception_loss * self.perception_loss_weight
+        return loss
 
-def buildSequenceModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pBinSizeInt, pNrSymbols, pDropoutRate):
-    #consists of two subnets for chromatin factors and sequence, respectively
-    #output neurons, see above for explanation
-    diff = pWindowSize - pMaxDist
-    nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
-    nr_elements_capped = int( 1/2 * diff * (diff+1) )   
-    out_neurons = nr_elements_fullMatrix - nr_elements_capped
-    #model for chromatin factors first
-    kernelWidth = 1
-    nr_neurons1 = 460
-    nr_neurons2 = 881
-    nr_neurons3 = 1690
-    model1 = Sequential()
-    model1.add(Input(shape=(2*pFlankingSize + pWindowSize,pNrFactors), name="factorData"))
-    model1.add(Conv1D(filters=1, 
-                     kernel_size=kernelWidth, 
-                     activation="sigmoid",
-                     data_format="channels_last"))
-    model1.add(Flatten())
-    model1.add(Dense(nr_neurons1,activation="relu",kernel_regularizer="l2"))        
-    model1.add(Dropout(pDropoutRate))
-    model1.add(Dense(nr_neurons2,activation="relu",kernel_regularizer="l2"))
-    model1.add(Dropout(pDropoutRate))
-    model1.add(Dense(nr_neurons3,activation="relu",kernel_regularizer="l2"))
-    model1.add(Dropout(pDropoutRate))
-    
-    #CNN model for sequence
-    filters1 = 5
-    maxpool1 = 5
-    kernelSize1 = 6
-    kernelSize2 = 10
-    model2 = Sequential()
-    model2.add(Input(shape=(pWindowSize*pBinSizeInt,pNrSymbols), name="sequenceData"))
-    model2.add(Conv1D(filters=filters1, 
-                      kernel_size=kernelSize1,
-                      activation="relu",
-                      data_format="channels_last"))
-    model2.add(MaxPool1D(maxpool1))
-    model2.add(Conv1D(filters=filters1,
-                      kernel_size=kernelSize1,
-                      activation="relu",
-                      data_format="channels_last"))
-    model2.add(MaxPool1D(maxpool1))
-    model2.add(Conv1D(filters=filters1,
-                      kernel_size=kernelSize2,
-                      activation="relu",
-                      data_format="channels_last"))
-    model2.add(MaxPool1D(maxpool1))
-    model2.add(Conv1D(filters=filters1,
-                      kernel_size=kernelSize2,
-                      activation="relu",
-                      data_format="channels_last"))
-    model2.add(MaxPool1D(maxpool1))
-    model2.add(Conv1D(filters=filters1,
-                      kernel_size=kernelSize2,
-                      activation="relu",
-                      data_format="channels_last"))                              
-    model2.add(Flatten())
-    model2.add(Dense(nr_neurons2, activation="relu",kernel_regularizer="l2"))
-    model2.add(Dropout(pDropoutRate))
-    combined = Concatenate()([model1.output,model2.output])
-    x = Dense(out_neurons,activation="relu",kernel_regularizer="l2")(combined)
- 
-    finalModel = Model(inputs=[model1.input, model2.input], outputs=x)
-    return finalModel
+    def getPerceptionModel(self):
+        model = vgg16.VGG16(weights="imagenet", include_top=False, input_shape=(self.windowsize, self.windowsize, 3))  
+        model.trainable = False
+        structureOutput = model.get_layer("block4_conv3").output
+        perceptionModel = Model(inputs=model.inputs, outputs=structureOutput)
+        perceptionModel.trainable = False
+        for layer in perceptionModel.layers:
+            layer.trainable = False
+        return perceptionModel
+
+    @tf.function
+    def train_step(self, input_factors, target):
+        with tf.GradientTape() as tape:
+            predicted = self.model(input_factors, training=True)
+            loss = self.lossFunction(predicted, target)
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        return loss
+
+    @tf.function
+    def validation_step(self, input_factors, target):
+        predicted = self.model(input_factors, training=False)
+        loss = self.lossFunction(predicted, target)
+        return loss
+
+    @tf.function
+    def prediction_step(self, model, input_factors):
+        pred_batch = model(input_factors, training=False).numpy()
+        ret_list = [pred_batch[x] for x in range(pred_batch.shape[0])]
+        return ret_list
+
+    def fit(self, train_ds, validation_ds, nr_epochs: int = 1, steps_per_epoch: int = 1, save_freq: int = 20):
+        #filename for plots
+        lossPlotFilename = "lossOverEpochs.{:s}".format(self.figure_type)
+        lossPlotFilename = os.path.join(self.outfolder, lossPlotFilename)
+        #models for converting predictions as needed
+        #lists to store loss for each epoch
+        trainLossList_epochs = [] 
+        valLossList_epochs = []
+        #iterate over all epochs and batches in the train/validation datasets
+        #compute gradients and update weights accordingly
+        for epoch in range(nr_epochs):
+            if epoch % 5 == 0:
+                for example_input, example_target in validation_ds.take(1):
+                    self.generate_images(example_input, example_target, epoch)
+            
+            train_pbar = tqdm(train_ds, total=steps_per_epoch)
+            train_pbar.set_description("Epoch {:05d}".format(epoch+1))
+            trainLossList_batches = [] #lists to store loss for each batch
+            for x, y in train_pbar:
+                lossVal = self.train_step(input_factors=x, target=y["out_matrixData"])
+                trainLossList_batches.append(lossVal)
+                if epoch == 0:
+                    train_pbar.set_postfix( {"loss": "{:.4f}".format(lossVal)} )
+                else:
+                    train_pbar.set_postfix( {"train loss": "{:.4f}".format(lossVal),
+                                             "val loss": "{:.4f}".format(valLossList_epochs[-1])} )
+            trainLossList_epochs.append(np.mean(trainLossList_batches))
+            del trainLossList_batches
+            valLossList_batches = []
+            for x, y in validation_ds:
+                val_loss = self.validation_step(input_factors=x, target=y["out_matrixData"])
+                valLossList_batches.append(val_loss)
+            valLossList_epochs.append(np.mean(valLossList_batches))
+            del valLossList_batches
+            #plot loss and save model every savefreq epochs
+            if (epoch + 1) % save_freq == 0:
+                checkpointFilename = "checkpoint_{:05d}.h5".format(epoch + 1)
+                checkpointFilename = os.path.join(self.outfolder, checkpointFilename)
+                self.model.save(filepath=checkpointFilename,save_format="h5")
+                del checkpointFilename
+                utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
+                        pNameList=["train", "validation"],
+                        pFilename=lossPlotFilename)
+                #save the loss values so that they can be plotted again in different formats later on
+                valLossFilename = "val_loss_{:05d}.npy".format(epoch + 1)
+                trainLossFilename = "train_loss_{:05d}.npy".format(epoch + 1)
+                valLossFilename = os.path.join(self.outfolder, valLossFilename)
+                trainLossFilename = os.path.join(self.outfolder, trainLossFilename)
+                np.save(valLossFilename, valLossList_epochs)
+                np.save(trainLossFilename, trainLossList_epochs)
+                del valLossFilename, trainLossFilename
+        checkpointFilename = "trainedModel.h5"
+        checkpointFilename = os.path.join(self.outfolder, checkpointFilename)
+        self.model.save(filepath=checkpointFilename,save_format="h5")
+        del checkpointFilename
+        utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
+                        pNameList=["train", "validation"],
+                        pFilename=lossPlotFilename)
+
+    def predict(self, test_ds, trained_model_filepath: str = ""):
+        trainedModel = self.model
+        if trained_model_filepath != "":
+            try:
+                trainedModel = tf.keras.models.load_model(trained_model_filepath, custom_objects=CustomReshapeLayer(self.windowsize))  
+            except Exception as e:
+                msg = "Aborting. Could not load model, wrong file or format?"
+                raise SystemExit(str(e) + "\n" + msg )
+        pred_list = []
+        for x in test_ds:
+            pred_list.extend( self.prediction_step(trainedModel, x) )
+        return np.array(pred_list)
+
+    def plotModel(self):
+        #plot the model using workaround from tensorflow issue #38988
+        modelPlotName = "model.{:s}".format(self.figure_type)
+        modelPlotName = os.path.join(self.outfolder, modelPlotName)
+        #self.model._layers = [layer for layer in self.model._layers if isinstance(layer, tf.keras.layers.Layer)] #workaround for plotting with custom loss functions
+        tf.keras.utils.plot_model(self.model, show_shapes=True, to_file=modelPlotName)
+
+    def generate_images(self, test_input, target, epoch: int):
+        prediction = self.model(test_input, training=False)
+        figname = "testpred_epoch_{:05d}.{:s}".format(epoch, self.figure_type)
+        figname = os.path.join(self.outfolder, figname)
+        display_list = [test_input["factorData"][0], target["out_matrixData"][0], prediction[0]]
+        titleList = ['Input Image', 'Ground Truth', 'Predicted Image']
+        fig1, axs1 = plt.subplots(1,len(display_list), figsize=(15,15))
+        for i in range(len(display_list)):
+            axs1[i].imshow(display_list[i] * 0.5 + 0.5)
+            axs1[i].set_title(titleList[i])
+        fig1.savefig(figname)
+        plt.close(fig1)
+        del fig1, axs1
+
+    @staticmethod
+    def getPerPixelLoss(pixelLoss: str):
+        if pixelLoss == "MSE":
+            loss_fn = tf.keras.losses.MeanSquaredError()
+        elif pixelLoss.startswith("Huber"):
+            try:
+                delta = float(pixelLoss.lstrip("Huber"))
+                loss_fn = tf.keras.losses.Huber(delta=delta)       
+            except:
+                loss_fn = tf.keras.losses.Huber()
+        elif pixelLoss == "MAE":
+            loss_fn = tf.keras.losses.MeanAbsoluteError()
+        elif pixelLoss == "MAPE":
+            loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
+        elif pixelLoss == "MSLE":
+            loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
+        elif pixelLoss == "Cosine":
+            loss_fn = tf.keras.losses.CosineSimilarity()
+        else:
+            raise NotImplementedError("unknown loss function")
+        return loss_fn
+
+    @staticmethod
+    def getOptimizer(pOptimizerString, pLearningrate):
+        kerasOptimizer = None
+        if pOptimizerString == "SGD":
+            kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=pLearningrate)
+        elif pOptimizerString == "Adam":
+            kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=pLearningrate)
+        elif pOptimizerString == "RMSprop":
+            kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=pLearningrate)
+        else:
+            raise NotImplementedError("unknown optimizer")
+        return kerasOptimizer
+
 
 class CustomReshapeLayer(tf.keras.layers.Layer):
     '''
@@ -245,217 +460,3 @@ class TadInsulationScoreLayer(tf.keras.layers.Layer):
     
     def get_config(self):
         return {"matsize": self.matsize, "diamondsize": self.diamondsize}
-
-class SymmetricFromTriuLayer(tf.keras.layers.Layer):
-    '''
-    make upper triangular tensors symmetric
-    example:
-    [[1,2,3],
-     [0,4,5],
-     [0,0,6]] 
-    becomes:
-    [[1,2,3],
-     [2,4,5],
-     [3,5,6]] 
-    '''
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def call(self, inputs):
-        return tf.map_fn(self.makeSymmetric, inputs, parallel_iterations=20, swap_memory=True)
-
-    def makeSymmetric(self, inputMat):
-        outMat = inputMat + tf.transpose(inputMat) - tf.linalg.band_part(inputMat, 0, 0)
-        #the diagonal is the same for input and transpose, so subtract it once
-        return outMat
-
-class ScalingLayer(tf.keras.layers.Layer):
-    def __init__(self, maxval=1.0, **kwargs):
-        super().__init__(**kwargs)
-        self.maxval = maxval
-
-    def call(self, inputs):
-        return tf.map_fn(self.scale, inputs, parallel_iterations=20, swap_memory=True)
-
-    def scale(self, inputs):
-        minTens = tf.reduce_min(inputs)
-        maxTens = tf.reduce_max(inputs)
-        enumTens = tf.subtract(inputs, minTens)
-        denomTens = tf.subtract(maxTens, minTens)
-        def d1(): return inputs
-        def d2(): return tf.math.divide(enumTens, denomTens) * self.maxval
-        retTens = tf.cond(tf.math.equal(minTens, maxTens), d1, d2)
-        return retTens
-
-    def get_config(self):
-        return {"maxval": self.maxval}
-
-def customLossWrapper(pMatrixsize, pDiamondsize):
-    def customLoss(y_true, y_pred):
-        #compute the score from the predicted (flattened) upper triangular matrix
-        predScore = CustomReshapeLayer(matsize=pMatrixsize)(y_pred)
-        predScore = TadInsulationScoreLayer(matsize=pMatrixsize,diamondsize=pDiamondsize)(predScore)
-        #compute mean squared error for TAD insulation score
-        predLoss = tf.square(y_true - predScore)
-        predLoss = tf.reduce_mean(predLoss)
-        return predLoss
-    return customLoss
-
-def getOptimizer(pOptimizerString, pLearningrate):
-    kerasOptimizer = None
-    if pOptimizerString == "SGD":
-        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=pLearningrate)
-    elif pOptimizerString == "Adam":
-        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=pLearningrate)
-    elif pOptimizerString == "RMSprop":
-        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=pLearningrate)
-    else:
-        raise NotImplementedError("unknown optimizer")
-    return kerasOptimizer
-
-def lossFunction(pixelLoss="MSE", pixelWeight=1.0,
-                 windowsize=None,
-                 scoreWeight=0.0, diamondsize=None,\
-                 tvWeight=0.0,\
-                 msSSIMweight=0.0,\
-                 perceptionWeight=0.0):
-    #sanity check for inputs
-    errorMsg = []
-    if scoreWeight > 0 and (not isinstance(windowsize, int) or not isinstance(diamondsize, int)):
-        errorMsg.append("If scoreWeight > 0.0, Windowsize and Diamondsize must be set (int32 > 0)")
-    if isinstance(windowsize, int) and isinstance(diamondsize, int) and windowsize - 2*diamondsize <= 1:
-        errorMsg.append("Diamondsize too large or Windowsize too small, Windowsize must be >> 2*Diamondsize")
-    if not isinstance(windowsize, int) and (tvWeight > 0.0 or msSSIMweight > 0.0 or perceptionWeight > 0.0):
-        errorMsg.append("TV loss, MS-SSIM loss and Perception loss require Windowsize")
-    if len(errorMsg) > 0:
-        errorMsg = "\n".join(errorMsg)
-        raise ValueError(errorMsg)
-
-    #choose appropriate loss function for "simple" regression loss
-    if pixelLoss == "MSE":
-        loss_fn = tf.keras.losses.MeanSquaredError()
-    elif pixelLoss.startswith("Huber"):
-        try:
-            delta = float(pixelLoss.lstrip("Huber"))
-            loss_fn = tf.keras.losses.Huber(delta=delta)       
-        except:
-            loss_fn = tf.keras.losses.Huber()
-    elif pixelLoss == "MAE":
-        loss_fn = tf.keras.losses.MeanAbsoluteError()
-    elif pixelLoss == "MAPE":
-        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
-    elif pixelLoss == "MSLE":
-        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
-    elif pixelLoss == "Cosine":
-        loss_fn = tf.keras.losses.CosineSimilarity()
-    else:
-        raise NotImplementedError("unknown loss function")
-    reshapeLayer = None
-    tadScoreLayer = None
-    makeSymmetricLayer = None
-    scalingLayer = None
-    perceptionModel = None 
-
-    if isinstance(windowsize, int):
-        reshapeLayer = CustomReshapeLayer(windowsize)
-        makeSymmetricLayer = SymmetricFromTriuLayer()
-        scalingLayer = ScalingLayer(maxval=0.999)
-        #max filter size for ms-ssim
-        maxfiltersize = min(int(np.floor(windowsize / 2**4)), 11)
-    if scoreWeight > 0.0:
-        tadScoreLayer = TadInsulationScoreLayer(windowsize, diamondsize)
-    if perceptionWeight > 0.0:
-        # pre-trained VGG16 model for perception loss
-        model = vgg16.VGG16(weights="imagenet", include_top=False, input_shape=(windowsize, windowsize, 3))  
-        model.trainable = False
-        structureOutput = model.get_layer("block4_conv3").output
-        perceptionModel = Model(inputs=model.inputs, outputs=structureOutput)
-
-    def loss_function(y_true, y_pred):
-        loss = tf.zeros(shape=())
-        if pixelWeight > 0.0:
-            #compute the regression loss
-            loss += loss_fn(y_true, y_pred) * pixelWeight
-        if tvWeight > 0. or msSSIMweight > 0. or perceptionWeight > 0. or scoreWeight > 0.0:
-            #create images from the flat vectors
-            y_true_scaled = scalingLayer(y_true) #value range 0..0.999
-            y_true_matrix = reshapeLayer(y_true_scaled) #2D embedding as upper triangle
-            y_true_symmetric = makeSymmetricLayer(y_true_matrix) #symmetric matrix
-            y_true_grayscale = tf.expand_dims(y_true_symmetric, axis=-1) #make it an image with channels last, i.e. shape = (batchsize, matsize, matsize, 1)      
-            y_pred_scaled = scalingLayer(y_pred) 
-            y_pred_matrix = reshapeLayer(y_pred_scaled)
-            y_pred_symmetric = makeSymmetricLayer(y_pred_matrix)
-            y_pred_grayscale = tf.expand_dims(y_pred_symmetric, axis=-1)
-            #compute total variation loss
-            if tvWeight > 0.0:
-                tvLoss = tf.reduce_sum(tf.image.total_variation(y_pred_grayscale)) 
-                loss += tvLoss * tvWeight
-            #compute multi-scale structural similarity index
-            if msSSIMweight > 0.0:
-                #msSSIM = tf.image.ssim_multiscale(tf.image.convert_image_dtype(y_true_grayscale, tf.uint8), tf.image.convert_image_dtype(y_pred_grayscale, tf.uint8), 255, filter_size=maxfiltersize)
-                #msSSIM = tf.where(tf.math.is_nan(msSSIM), tf.ones_like(msSSIM), msSSIM)
-                #msSSIM = tf.where(tf.math.is_inf(msSSIM), tf.ones_like(msSSIM), msSSIM)
-                #msSSIMloss = 1 - tf.reduce_mean( msSSIM )
-                msSSIM = tf.image.ssim(y_true_grayscale, y_pred_grayscale, 1., filter_size=maxfiltersize)
-                mSSIMloss = 1.0 - tf.reduce_mean(msSSIM)
-                loss += mSSIMloss * msSSIMweight
-            #compute TAD insulation scores
-            if scoreWeight > 0.0:
-                predScore = tadScoreLayer(y_pred_symmetric)
-                trueScore = tadScoreLayer(y_true_symmetric)
-                scoreLoss = tf.reduce_mean(tf.square(trueScore - predScore))
-                loss += scoreLoss * scoreWeight
-            #compute perception loss
-            if perceptionWeight > 0.0:
-                predRGB = tf.image.grayscale_to_rgb(y_pred_grayscale)
-                trueRGB = tf.image.grayscale_to_rgb(y_true_grayscale)
-                predActivations = perceptionModel(predRGB)
-                trueActivations = perceptionModel(trueRGB)
-                perceptionLoss = tf.reduce_mean(tf.square(trueActivations - predActivations))
-                loss += perceptionLoss * perceptionWeight
-        return loss
-    return loss_function
-
-
-def getPerceptionModel(windowsize):
-    model = vgg16.VGG16(weights="imagenet", include_top=False, input_shape=(windowsize, windowsize, 3))  
-    model.trainable = False
-    structureOutput = model.get_layer("block4_conv3").output
-    perceptionModel = Model(inputs=model.inputs, outputs=structureOutput)
-    perceptionModel.trainable = False
-    for layer in perceptionModel.layers:
-        layer.trainable = False
-    return perceptionModel
-
-def getPerPixelLoss(pixelLoss: str):
-    if pixelLoss == "MSE":
-        loss_fn = tf.keras.losses.MeanSquaredError()
-    elif pixelLoss.startswith("Huber"):
-        try:
-            delta = float(pixelLoss.lstrip("Huber"))
-            loss_fn = tf.keras.losses.Huber(delta=delta)       
-        except:
-            loss_fn = tf.keras.losses.Huber()
-    elif pixelLoss == "MAE":
-        loss_fn = tf.keras.losses.MeanAbsoluteError()
-    elif pixelLoss == "MAPE":
-        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
-    elif pixelLoss == "MSLE":
-        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
-    elif pixelLoss == "Cosine":
-        loss_fn = tf.keras.losses.CosineSimilarity()
-    else:
-        raise NotImplementedError("unknown loss function")
-    return loss_fn
-
-def getGrayscaleConversionModel(scalingFactor, windowsize):
-    inputs = Input(shape=(int(windowsize * (windowsize + 1) / 2 )) )
-    x = ScalingLayer(maxval=scalingFactor)(inputs)
-    x = CustomReshapeLayer(matsize=windowsize)(x)
-    x = SymmetricFromTriuLayer()(x)
-    x = tf.keras.layers.Lambda(lambda z: tf.expand_dims(z, axis=-1))(x)
-    model = Model(inputs=inputs, outputs=x)
-    model.trainable = False
-    for layer in model.layers:
-        layer.trainable = False
-    return model

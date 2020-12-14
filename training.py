@@ -279,39 +279,12 @@ def training(trainmatrices,
     for i in range(nr_factors):
         paramDict["chromFactor_" + str(i)] = container0.factorNames[i]
     sequenceSymbols = container0.sequenceSymbols
-    nr_symbols = None
+    nr_symbols = 0
     if isinstance(sequenceSymbols, set):
         nr_symbols = len(sequenceSymbols)
     nr_trainingSamples = sum(nr_samples_list[0:len(traindataContainerList)])
     storedFeaturesDict = container0.storedFeatures
     
-    #build the requested model
-    model = models.buildModel(pModelTypeStr=modelTypeStr, 
-                                    pWindowSize=windowsize,
-                                    pBinSizeInt=binsize,
-                                    pNrFactors=nr_factors,
-                                    pNrSymbols=nr_symbols,
-                                    pFlankingSize=flankingsize,
-                                    pMaxDist=maxdist)
-    #define optimizer
-    kerasOptimizer = models.getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
-    
-    #build and print the model
-    model.build(input_shape = (windowsize + 2*flankingsize, nr_factors))
-    model.summary()
-
-    #writers for tensorboard
-    traindatapath = os.path.join(outputpath, "train/")
-    validationDataPath = os.path.join(outputpath, "validation/")
-    if os.path.exists(traindatapath):
-        [os.remove(os.path.join(traindatapath, f)) for f in os.listdir(traindatapath)] 
-    if os.path.exists(validationDataPath):
-        [os.remove(os.path.join(validationDataPath, f)) for f in os.listdir(validationDataPath)]
-    summary_writer_train = tf.summary.create_file_writer(traindatapath)
-    summary_writer_val = tf.summary.create_file_writer(validationDataPath)
-
-     
-
     #save the training parameters to a file before starting to train
     #(allows recovering the parameters even if training is aborted
     # and only intermediate models are available)
@@ -320,14 +293,9 @@ def training(trainmatrices,
         dictWriter = csv.DictWriter(csvfile, fieldnames=sorted(list(paramDict.keys())))
         dictWriter.writeheader()
         dictWriter.writerow(paramDict)
-
-    #plot the model using workaround from tensorflow issue #38988
-    modelPlotName = "model.{:s}".format(figuretype)
-    modelPlotName = os.path.join(outputpath, modelPlotName)
-    model._layers = [layer for layer in model._layers if isinstance(layer, tf.keras.layers.Layer)] #workaround for plotting with custom loss functions
-    tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
     #build input streams
+    #train data
     shuffleBufferSize = 3*recordsize
     trainDs = tf.data.TFRecordDataset(traindataRecords, 
                                         num_parallel_reads=tf.data.experimental.AUTOTUNE,
@@ -336,6 +304,7 @@ def training(trainmatrices,
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.batch(batchsize, drop_remainder=True)
     trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
+    #validation data
     validationDs = tf.data.TFRecordDataset(validationdataRecords, 
                                             num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                             compression_type="GZIP")
@@ -343,81 +312,37 @@ def training(trainmatrices,
     validationDs = validationDs.batch(batchsize)
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
-    weights_before = model.layers[1].weights[0].numpy()
-
-    #filename for plots
-    lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
-    lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
-    #models for converting predictions as needed
-    percLossMod = models.getPerceptionModel(windowsize)
-    grayscaleMod = models.getGrayscaleConversionModel(scalingFactor=0.999, windowsize=windowsize)
-    #get the per-pixel loss function (also used for perception loss and score loss)
-    loss_fn = models.getPerPixelLoss(loss)
-    #lists to store loss for each epoch
-    trainLossList_epochs = [] 
-    valLossList_epochs = []
-    #iterate over all epochs and batches in the train/validation datasets
-    #compute gradients and update weights accordingly
-    for epoch in range(numberepochs):
-        pbar_batch = tqdm(trainDs, total=int(np.floor(nr_trainingSamples / batchsize)))
-        pbar_batch.set_description("Epoch {:05d}".format(epoch+1))
-        trainLossList_batches = [] #lists to store loss for each batch
-        for x, y in pbar_batch:
-            lossVal = trainStep(creationModel=model, 
-                                grayscaleConversionModel=grayscaleMod, 
-                                factorInputBatch=x, 
-                                targetInputBatch=y, 
-                                optimizer=kerasOptimizer, 
-                                perceptionLossModel=percLossMod,
-                                pixelLossWeight=pixellossweight, 
-                                ssimWeight=structureweight, 
-                                tvWeight=tvweight, 
-                                perceptionWeight=perceptionweight,
-                                scoreWeight=scoreweight,
-                                lossFn = loss_fn
-                                )
-            trainLossList_batches.append(lossVal)
-            pbar_batch.set_postfix( {"loss": "{:.4f}".format(lossVal)} )
-        trainLossList_epochs.append(np.mean(trainLossList_batches))
-        trainLossList_batches = []
-        with summary_writer_train.as_default(): #pylint: disable=not-context-manager
-            tf.summary.scalar('train_loss', trainLossList_epochs[epoch], step=epoch+1)
-        valLossList_batches = []
-        for x,y in validationDs:
-            val_loss = validationStep(creationModel=model, factorInputBatch=x, targetInputBatch=y, pixelLossWeight=pixellossweight )
-            valLossList_batches.append(val_loss)
-        valLossList_epochs.append(np.mean(valLossList_batches))
-        valLossList_batches = []
-        with summary_writer_val.as_default(): #pylint: disable=not-context-manager
-            tf.summary.scalar('validation_loss', valLossList_epochs[epoch], step=epoch+1)
-        #plot loss and save figure every savefreq epochs
-        if (epoch + 1) % savefreq == 0:
-            checkpointFilename = "checkpoint_{:05d}.h5".format(epoch + 1)
-            checkpointFilename = os.path.join(outputpath, checkpointFilename)
-            model.save(filepath=checkpointFilename,save_format="h5")
-            utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
-                    pNameList=["train", "validation"],
-                    pFilename=lossPlotFilename)
-            #save the loss values so that they can be plotted again in different formats later on
-            valLossFilename = "val_loss_{:05d}.npy".format(epoch + 1)
-            trainLossFilename = "train_loss_{:05d}.npy".format(epoch + 1)
-            valLossFilename = os.path.join(outputpath, valLossFilename)
-            trainLossFilename = os.path.join(outputpath, trainLossFilename)
-            np.save(valLossFilename, valLossList_epochs)
-            np.save(trainLossFilename, trainLossList_epochs)
-            del valLossFilename, trainLossFilename
-
-    weights_after = model.layers[1].weights[0].numpy()
+    #build the requested model
+    model = models.ConversionModel(optimizer = optimizer,
+                                   learning_rate=learningrate,
+                                   windowsize=windowsize,
+                                   flankingsize=flankingsize,
+                                   nr_factors=nr_factors,
+                                   nr_symbols=nr_symbols,
+                                   model_type=modelTypeStr,
+                                   binsize=binsize,
+                                   tv_weight=tvweight,
+                                   ssim_loss_weight=structureweight,
+                                   pixel_loss_weight=pixellossweight,
+                                   score_loss_weight=scoreweight,
+                                   perception_loss_weight=perceptionweight,
+                                   pixel_loss_function=loss,
+                                   outfolder=outputpath,
+                                   figure_type=figuretype)
+    model.plotModel()
+    #fit the model
+    weights_before = model.model.trainable_weights[0].numpy()
+    model.fit(train_ds=trainDs, 
+              validation_ds=validationDs, 
+              nr_epochs=numberepochs,
+              steps_per_epoch=int(np.floor(nr_trainingSamples/batchsize)),
+              save_freq=savefreq)
+    weights_after = model.model.trainable_weights[0].numpy()
     print("weight sum before", np.sum(weights_before))
     print("weight sum after", np.sum(weights_after))
 
     #store the trained network
-    model.save(filepath=modelfilepath,save_format="h5")
-
-    #plot final train- and validation loss over epochs
-    utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
-                    pNameList=["train", "validation"],
-                    pFilename=lossPlotFilename)
+    model.model.save(filepath=modelfilepath,save_format="h5")
 
     #delete train- and validation records, if debugstate not set
     if debugstate is None or debugstate=="Figures":
@@ -426,53 +351,7 @@ def training(trainmatrices,
                 os.remove(record)
 
 
-@tf.function
-def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None, lossFn=tf.keras.losses.MeanSquaredError()):
-    with tf.GradientTape() as tape:
-        loss = tf.zeros(shape=())
-        predVec = creationModel(factorInputBatch, training=True)
-        trueVec = targetInputBatch['out_matrixData']
-        #per-pixel MSE
-        if pixelLossWeight > 0.0:
-            #loss += tf.reduce_sum( tf.square(trueVec - predVec) ) * pixelLossWeight
-            loss += lossFn(trueVec, predVec)
-        #convert vector batches to grayscale image batches
-        y_true_grayscale = grayscaleConversionModel(trueVec)     
-        y_pred_grayscale = grayscaleConversionModel(predVec)
-        #perception loss based on pre-trained network
-        if perceptionWeight > 0.0:
-            y_true_rgb = tf.image.grayscale_to_rgb(y_true_grayscale)
-            y_pred_rgb = tf.image.grayscale_to_rgb(y_pred_grayscale)
-            predActivations = perceptionLossModel(y_pred_rgb)
-            trueActivations = perceptionLossModel(y_true_rgb)
-            perceptionLoss = lossFn(trueActivations, predActivations)
-            loss += perceptionLoss * perceptionWeight
-        #Total Variation loss
-        if tvWeight > 0.0:
-            tvLoss = tf.reduce_sum(tf.image.total_variation(y_pred_grayscale)) 
-            loss += tvLoss * tvWeight
-        #multiscale structural similarity loss (MS-SSIM)
-        if ssimWeight > 0.0:
-            ssim = tf.image.ssim(y_true_grayscale, y_pred_grayscale, 1., filter_size=5)
-            ssimLoss = 1.0 - tf.reduce_mean(ssim)
-            loss += ssimLoss * ssimWeight
-        #loss based on TAD insulation score
-        if scoreWeight > 0.0:
-            predScore = models.TadInsulationScoreLayer(80,15)(y_pred_grayscale)
-            trueScore = models.TadInsulationScoreLayer(80,15)(y_true_grayscale)
-            scoreLoss = lossFn(trueScore, predScore)
-            loss += scoreLoss * scoreWeight
-    gradients = tape.gradient(loss, creationModel.trainable_variables)
-    optimizer.apply_gradients(zip(gradients, creationModel.trainable_variables))
-    return loss
 
-@tf.function
-def validationStep(creationModel, factorInputBatch, targetInputBatch, pixelLossWeight=1.0, lossFn=tf.keras.losses.MeanSquaredError()):
-    val_loss = tf.zeros(shape=())
-    predVec = creationModel(factorInputBatch, training=False)
-    trueVec = targetInputBatch['out_matrixData']
-    val_loss += lossFn(trueVec,predVec) * pixelLossWeight
-    return val_loss
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
     modeltypeStr = pModelTypeStr

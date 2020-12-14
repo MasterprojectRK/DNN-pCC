@@ -353,10 +353,12 @@ class DataContainer():
         stopInd = startInd + windowsize
         trainmatrix = None
         if isinstance(self.maxdist, int) and self.maxdist < windowsize and self.maxdist > 0: #trapezoids, i.e. distance limited submatrices
-            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.mask_indices(windowsize, utils.maskFunc, self.maxdist)]
+            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()
         else: #triangles, i. e. full submatrices
-            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()[np.triu_indices(windowsize)]
-        trainmatrix = np.array(np.nan_to_num(trainmatrix))[0,:]
+            trainmatrix = self.sparseHiCMatrix[startInd:stopInd,startInd:stopInd].todense()
+        trainmatrix = np.array(np.nan_to_num(trainmatrix)).astype("float32")
+        trainmatrix = utils.scaleArray(trainmatrix)
+        trainmatrix = np.expand_dims(trainmatrix, axis=-1) #make it a grayscale image
         return trainmatrix
     
     def __getSequenceData(self, idx):
@@ -387,7 +389,7 @@ class DataContainer():
             flankingsize = windowsize
         startInd = idx
         stopInd = startInd + 2*flankingsize + windowsize
-        factorArray = self.FactorDataArray[startInd:stopInd,:]
+        factorArray = self.FactorDataArray[startInd:stopInd,:].astype("float32")
         return factorArray
 
     def getSampleData(self, idx):
@@ -396,8 +398,8 @@ class DataContainer():
         factorArray = self.__getFactorData(idx)
         matrixArray = self.__getMatrixData(idx)
         sequenceArray = self.__getSequenceData(idx)
-        return {"factorData": factorArray.astype("float32"), 
-                "out_matrixData": matrixArray.astype("float32"), 
+        return {"factorData": factorArray, 
+                "out_matrixData": matrixArray, 
                 "sequenceData": sequenceArray}
         
     def plotFeatureAtIndex(self, idx, outpath, figuretype="png"):
