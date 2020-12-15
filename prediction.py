@@ -96,22 +96,6 @@ def prediction(validationmatrix,
         scoreSize = None
         scoreWeight = 0.0
     
-    #load the trained model
-    modelLoadParams = {"filepath": trainedmodel}
-    try:
-        trainedModel = tf.keras.models.load_model(**modelLoadParams)
-        weightsFirstLayer = trainedModel.layers[1].weights[0].numpy()
-        print("weight sum {:.3f}".format(np.sum(weightsFirstLayer)))
-    except Exception as e:
-        print(e)
-        msg = "Could not load trained model {:s} - Wrong file or format?"
-        msg = msg.format(trainedmodel)
-        raise SystemExit(msg)
-    #check if a DNA sequence data is required as model input
-    if modelType == "sequence" and sequencefile is None:
-        msg = "Aborting. Model was trained with sequence, but no sequence file provided (option -sf)"
-        raise SystemExit(msg)
-
     #extract chromosome names from the input
     chromNameList = chromosome.replace(",", " ").rstrip().split(" ")  
     chromNameList = sorted([x.lstrip("chr") for x in chromNameList])
@@ -155,50 +139,45 @@ def prediction(validationmatrix,
         msg += "\n".join(container0.factorNames)
         raise SystemExit(msg)
     
-    #build the TFData input stream for prediction
-    storedFeaturesDict = container0.storedFeatures
-    testDs = tf.data.TFRecordDataset(tfRecordFilenames, 
+    model = models.ConversionModel(optimizer="SGD",
+                                   learning_rate=1e-5,
+                                   windowsize=windowsize,
+                                   flankingsize=flankingsize,
+                                   nr_factors=nr_Factors,
+                                   model_type=modelType,
+                                   binsize=binSizeInt,
+                                   outfolder=outputpath)
+
+    predList = []
+    for tfrecord, container in zip(tfRecordFilenames, testdataContainerList):
+        #build the TFData input stream for prediction
+        storedFeaturesDict = container.storedFeatures
+        testDs = tf.data.TFRecordDataset(tfrecord, 
                                         num_parallel_reads=None,
                                         compression_type="GZIP")
-    testDs = testDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    testDs = testDs.batch(batchSizeInt) #do NOT drop the last batch (maybe incomplete, i.e. smaller, because batch size doesn't integer divide chrom size)
-    if validationmatrix is not None:
-        testDs = testDs.map(lambda x, y: x) #drop the target matrices (they are for evaluation)
-    testDs = testDs.prefetch(tf.data.experimental.AUTOTUNE)
-
-    #feed the chromatin factors through the trained model
-    predList = []
-    for x in testDs:
-        predBatch = predStep(trainedModel, x).numpy()
-        for i in range(predBatch.shape[0]):
-            predList.append(predBatch[i])        
-    predMatrixArray = np.array(predList)
-    #the predicted matrices are overlapping submatrices of the actual target Hi-C matrices
-    #they are ordered by chromosome names
-    #first find the chrom lengths in bins
-    chrLengthList = [container.chromSize_factors for container in testdataContainerList]
-    chrLengthList = [int(np.ceil(entry / binSizeInt)) - (2*flankingsize + windowsize) + 1 for entry in chrLengthList]
-    if sum(chrLengthList) != predMatrixArray.shape[0]:
-        msg = "Aborting. Failed separating prediction into single chromosomes"
-        raise SystemExit(msg)
-    #now split the prediction up into arrays of submatrices for each chromosome
-    indicesList = [sum(chrLengthList[0:i]) for i in range(len(chrLengthList)+1)]
-    matrixPerChromList = []
-    for i,j in zip(indicesList, indicesList[1:]):
-        matrixPerChromList.append(predMatrixArray[i:j,:])
+        testDs = testDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        testDs = testDs.batch(batchSizeInt) #do NOT drop the last batch (maybe incomplete, i.e. smaller, because batch size doesn't integer divide chrom size)
+        if validationmatrix is not None:
+            testDs = testDs.map(lambda x, y: x) #drop the target matrices (they are for evaluation)
+        testDs = testDs.prefetch(tf.data.experimental.AUTOTUNE)
+        #feed the chromatin factors through the trained model
+        predArray = model.predict(testDs, trainedmodel)
+        triu_indices = np.triu_indices(windowsize)
+        predArray = np.array( [np.array(x[triu_indices]) for x in predArray] )
+        predList.append(predArray)
+        
     #rebuild the matrices from the overlapping 
     #submatrices for each chromosome
-    for i, matrix in enumerate(matrixPerChromList):
-        matrixPerChromList[i] = utils.rebuildMatrix(pArrayOfTriangles=matrix, 
+    predList = [utils.rebuildMatrix(pArrayOfTriangles=matrix, 
                                                     pWindowSize=windowsize,
                                                     pFlankingSize=flankingsize,
-                                                    pMaxDist=maxdist )
+                                                    pMaxDist=maxdist ) for matrix in predList]
     #scale the re-assembled matrices into range [0..multiplier]
-    matrixPerChromList = [utils.scaleArray(matrix) * multiplier for matrix in matrixPerChromList]
+    predList = [utils.scaleArray(matrix) * multiplier for matrix in predList]
     #write predicted chromosomes into a single cooler file
     coolerMatrixName = os.path.join(outputpath, "predMatrix.cool")
     metadata = {"trainParams": trainParamDict, "predParams": predParamDict}
-    utils.writeCooler(pMatrixList=matrixPerChromList,
+    utils.writeCooler(pMatrixList=predList,
                      pBinSizeInt=binSizeInt,
                      pOutfile=coolerMatrixName,
                      pChromosomeList=chromNameList,
@@ -207,8 +186,8 @@ def prediction(validationmatrix,
     if scoreWeight > 0.0 and isinstance(scoreSize, int):
         bedgraphFileName = "scorePrediction_ds{:d}.bedgraph".format(scoreSize)            
         bedgraphFileName = os.path.join(outputpath, bedgraphFileName)
-        scoreList = [utils.computeScore(pMatrix=i, pDiamondsize=scoreSize) for i in tqdm(matrixPerChromList, desc="computing scores")]
-        chromSizeList = [i.shape[0] * binSizeInt for i in matrixPerChromList]
+        scoreList = [utils.computeScore(pMatrix=i, pDiamondsize=scoreSize) for i in tqdm(predList, desc="computing scores")]
+        chromSizeList = [i.shape[0] * binSizeInt for i in predList]
         utils.saveInsulationScoreToBedgraph(scoreArrayList=scoreList, 
                                             chromSizeList=chromSizeList, 
                                             binsize=binSizeInt,
@@ -218,24 +197,24 @@ def prediction(validationmatrix,
 
     #If target matrix provided, compute loss 
     #to assess prediction quality
-    if validationmatrix is not None:
-        evalDs = tf.data.TFRecordDataset(tfRecordFilenames, 
-                                        num_parallel_reads=None, #otherwise samples will be interleaved
-                                        compression_type="GZIP")
-        evalDs = evalDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        evalDs = evalDs.batch(batchSizeInt)
-        evalDs = evalDs.prefetch(tf.data.experimental.AUTOTUNE)
-        #compute loss for all samples
-        lossList = []
-        for x,y in evalDs:
-            loss = evalStep(trainedModel, x, y)
-            lossList.append(loss)
-        #(approximately) split loss per chromosomes
-        batchIndexList = [int(np.ceil(i/batchSizeInt)) for i in indicesList]
-        lossPerChromList = [np.mean(lossList[i:j]) for i, j in zip(batchIndexList, batchIndexList[1:])]
-        chromLossStrList = ["Chrom {:s}: {:.3f}".format(chrom, loss) for chrom, loss in zip(chromNameList, lossPerChromList)] 
-        msg = "Mean loss(es):\n{:s}".format("\n".join(chromLossStrList))
-        print(msg)
+    # if validationmatrix is not None:
+    #     evalDs = tf.data.TFRecordDataset(tfRecordFilenames, 
+    #                                     num_parallel_reads=None, #otherwise samples will be interleaved
+    #                                     compression_type="GZIP")
+    #     evalDs = evalDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    #     evalDs = evalDs.batch(batchSizeInt)
+    #     evalDs = evalDs.prefetch(tf.data.experimental.AUTOTUNE)
+    #     #compute loss for all samples
+    #     lossList = []
+    #     for x,y in evalDs:
+    #         loss = evalStep(trainedModel, x, y)
+    #         lossList.append(loss)
+    #     #(approximately) split loss per chromosomes
+    #     batchIndexList = [int(np.ceil(i/batchSizeInt)) for i in indicesList]
+    #     lossPerChromList = [np.mean(lossList[i:j]) for i, j in zip(batchIndexList, batchIndexList[1:])]
+    #     chromLossStrList = ["Chrom {:s}: {:.3f}".format(chrom, loss) for chrom, loss in zip(chromNameList, lossPerChromList)] 
+    #     msg = "Mean loss(es):\n{:s}".format("\n".join(chromLossStrList))
+    #     print(msg)
     
     #store prediction parameters
     parameterFile = os.path.join(outputpath, "predParams.csv")    
@@ -247,19 +226,6 @@ def prediction(validationmatrix,
     for record in tqdm(tfRecordFilenames, "removing TFRecords"):
         if os.path.exists(record):
             os.remove(record)
-
-@tf.function
-def predStep(trainedModel, inputBatch):
-    pred_vals = trainedModel(inputBatch, training=False)
-    return pred_vals
-
-@tf.function
-def evalStep(trainedModel, inputBatch, targetBatch, lossFn=tf.keras.losses.MeanSquaredError()):
-    pred_vals = trainedModel(inputBatch, training=False)
-    true_vals = targetBatch["out_matrixData"]
-    loss = lossFn(true_vals, pred_vals)
-    return loss
-
 
 
 if __name__ == "__main__":

@@ -298,9 +298,8 @@ class ConversionModel():
 
     @tf.function
     def prediction_step(self, model, input_factors):
-        pred_batch = model(input_factors, training=False).numpy()
-        ret_list = [pred_batch[x] for x in range(pred_batch.shape[0])]
-        return ret_list
+        pred_batch = model(input_factors, training=False)
+        return pred_batch
 
     def fit(self, train_ds, validation_ds, nr_epochs: int = 1, steps_per_epoch: int = 1, save_freq: int = 20):
         #filename for plots
@@ -373,17 +372,20 @@ class ConversionModel():
         same_mse_val = tf.reduce_mean(tf.square(val_before, val_after))
         msg = "same mse train: {:.5f} -- same mse val: {:.5f}".format(same_mse_train, same_mse_val)
         print(msg)
+    
     def predict(self, test_ds, trained_model_filepath: str = ""):
         trainedModel = self.model
         if trained_model_filepath != "":
             try:
-                trainedModel = tf.keras.models.load_model(trained_model_filepath, custom_objects=CustomReshapeLayer(self.windowsize))  
+                trainedModel = tf.keras.models.load_model(trained_model_filepath, custom_objects={"CustomReshapeLayer": CustomReshapeLayer(self.windowsize)})  
             except Exception as e:
                 msg = "Aborting. Could not load model, wrong file or format?"
                 raise SystemExit(str(e) + "\n" + msg )
         pred_list = []
-        for x in test_ds:
-            pred_list.extend( self.prediction_step(trainedModel, x) )
+        for batch in test_ds:
+            pred_batch = self.prediction_step(trainedModel, batch).numpy()
+            for i in range(pred_batch.shape[0]):
+                pred_list.append(pred_batch[i][:,:,0])
         return np.array(pred_list)
 
     def plotModel(self):
