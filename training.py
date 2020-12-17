@@ -81,6 +81,10 @@ tf.random.set_seed(35)
 @click.option("--scaleFactors","-scf", required=False,
                 type=bool, default=True,
                 help="Scale chromatin factor data to range 0...1 (recommended)")
+@click.option("--binsizeFactors", "-bsf", required=True,
+                type=click.IntRange(min=1000),
+                default=5000, show_default=True,
+                help="Binsize in basepairs for binning chromation features. Note that all matrices must be integer-divisible by the given value")
 @click.option("--modelType", "-mod", required=False,
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
                 default="initial", show_default=True,
@@ -147,6 +151,7 @@ def training(trainmatrices,
             scalematrix,
             clampfactors,
             scalefactors,
+            binsizefactors,
             modeltype,
             scoreweight,
             scoresize,
@@ -217,7 +222,8 @@ def training(trainmatrices,
             container = containerCls(chromosome=chrom,
                                     matrixfilepath=matrix,
                                     chromatinFolder=chromatinpath,
-                                    sequencefilepath=sequencefile)
+                                    sequencefilepath=sequencefile,
+                                    mode="training")
             traindataContainerList.append(container)
 
     #prepare the validation data containers. No data is loaded yet.
@@ -227,13 +233,15 @@ def training(trainmatrices,
             container = containerCls(chromosome=chrom,
                                     matrixfilepath=matrix,
                                     chromatinFolder=chromatinpath,
-                                    sequencefilepath=sequencefile)
+                                    sequencefilepath=sequencefile,
+                                    mode="validation")
             validationdataContainerList.append(container)
 
     #define the load params for the containers
     loadParams = {"scaleFeatures": scalefactors,
                   "clampFeatures": clampfactors,
                   "scaleTargets": scalematrix,
+                  "featureBinsize": binsizefactors,
                   "windowsize": windowsize,
                   "flankingsize": flankingsize,
                   "maxdist": maxdist}
@@ -269,8 +277,10 @@ def training(trainmatrices,
     #different binsizes are ok, as long as no sequence is used
     #not clear which binsize to use for prediction when they differ during training.
     #For now, store the max. 
-    binsize = max([container.binsize for container in traindataContainerList])
+    binsize = max([container.matrix_binsize for container in traindataContainerList])
     paramDict["binsize"] = binsize
+    feature_binsize = max([container.feature_binsize for container in traindataContainerList])
+    paramDict["feature_binsize"] = feature_binsize
     #because of compatibility checks above, 
     #the following properties are the same with all containers,
     #so just use data from first container
@@ -292,7 +302,8 @@ def training(trainmatrices,
                                     pNrFactors=nr_factors,
                                     pNrSymbols=nr_symbols,
                                     pFlankingSize=flankingsize,
-                                    pMaxDist=maxdist)
+                                    pMaxDist=maxdist,
+                                    pBinsizeFactor=container0.matrix_binsize//container0.feature_binsize)
     #define optimizer
     kerasOptimizer = models.getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
     

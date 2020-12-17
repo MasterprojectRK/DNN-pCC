@@ -8,7 +8,7 @@ import threading
 import utils
 
 
-def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, pFlankingSize=None, pMaxDist=None):
+def buildModel(pModelTypeStr, pWindowSize, pNrFactors: int, pBinSizeInt: int, pNrSymbols: int, pBinsizeFactor: int, pFlankingSize=None, pMaxDist=None):
     flankingsize = None
     maxdist = None
     if pFlankingSize is None:
@@ -28,27 +28,35 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
         #original model by Farre et al
         #See publication "Dense neural networks for predicting chromatin conformation" (https://doi.org/10.1186/s12859-018-2286-z).
         nrFiltersList = [1]
-        kernelSizeList = [1]
+        kernelSizeList = [pBinsizeFactor]
         nrNeuronsList = [460,881,1690]
+        stridesList = [pBinsizeFactor]
+        paddingList = ["valid"]
         sequentialModel = True
         dropoutRate = 0.1
     elif pModelTypeStr == "wider":
         #test model with wider filters
         nrFiltersList = [1]
-        kernelSizeList = [6]
+        kernelSizeList = [6*pBinsizeFactor]
         nrNeuronsList = [460,881,1690]
+        stridesList = [pBinsizeFactor]
+        paddingList = ["same"]
         sequentialModel = True
     elif pModelTypeStr == "longer":
         #test model with more convolution filters
         nrFiltersList = [6,6]
-        kernelSizeList= [1,1]
+        kernelSizeList= [pBinsizeFactor,1]
         nrNeuronsList = [1500,2400]
+        stridesList = [pBinsizeFactor,1]
+        paddingList=["valid", "valid"]
         sequentialModel = True
     elif pModelTypeStr == "wider-longer":
         #test model with more AND wider convolution filters
         nrFiltersList = [6,6]
-        kernelSizeList= [6,6]
+        kernelSizeList= [6*pBinsizeFactor,6]
         nrNeuronsList = [1500,2400]
+        stridesList= [pBinsizeFactor,1]
+        paddingList["same", "same"]
         sequentialModel = True
     
     if sequentialModel == True:
@@ -59,7 +67,10 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
                                     pNrFiltersList=nrFiltersList,
                                     pKernelWidthList=kernelSizeList,
                                     pNrNeuronsList=nrNeuronsList,
-                                    pDropoutRate=dropoutRate)
+                                    pStridesList=stridesList,
+                                    pPaddingList=paddingList,
+                                    pDropoutRate=dropoutRate,
+                                    pBinsizeFactor=pBinsizeFactor)
     elif sequentialModel == False and pModelTypeStr == "sequence":
         return buildSequenceModel(pWindowSize=pWindowSize,
                                   pFlankingSize=flankingsize,
@@ -72,37 +83,32 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors, pBinSizeInt, pNrSymbols, 
         msg = "Aborting. This type of model is not supported (yet)."
         raise NotImplementedError(msg)
 
-def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors, pNrFiltersList, pKernelWidthList, pNrNeuronsList, pDropoutRate):
+def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors: int, pNrFiltersList: list, pKernelWidthList: list, pNrNeuronsList: list, pStridesList: list, pPaddingList: list, pDropoutRate: float, pBinsizeFactor: int):
     msg = ""
-    if pNrFiltersList is None or not isinstance(pNrFiltersList, list):
-        msg += "No. of filters must be a list\n"
-    if pKernelWidthList is None or not isinstance(pKernelWidthList, list):
-        msg += "Kernel widths must be a list\n"
-    if pNrNeuronsList is None or not isinstance(pNrNeuronsList, list):
-        msg += "No. of neurons must be a list\n"
-    if msg != "":
+    if len(pNrFiltersList) != len(pKernelWidthList) or len(pNrFiltersList) < 1:
+        msg = "Error: Kernel widths and no. of filters must be specified for all 1Dconv. layers (min. 1 layer)"
         print(msg)
         return None
-    if len(pNrFiltersList) != len(pKernelWidthList) or len(pNrFiltersList) < 1:
-        msg = "kernel widths and no. of filters must be specified for all 1Dconv. layers (min. 1 layer)"
+    if len(pStridesList) != len(pNrFiltersList) or len(pPaddingList) != len(pNrFiltersList):
+        msg = "Error: Padding and strides must be given for all {:d} filters".format(len(pNrFiltersList))
         print(msg)
         return None
     if pDropoutRate <= 0 or pDropoutRate >= 1: 
         msg = "dropout must be in (0..1)"
         print(msg)
         return None
-    inputs = Input(shape=(2*pFlankingSize+pWindowSize,pNrFactors), name="factorData")
+    inputs = Input(shape=((2*pFlankingSize+pWindowSize)*pBinsizeFactor,pNrFactors), name="factorData")
     x = inputs
     #add the requested number of 1D convolutions
-    for i, (nr_filters, kernelWidth) in enumerate(zip(pNrFiltersList, pKernelWidthList)):
+    for i, (nr_filters, kernelWidth, strides, padding) in enumerate(zip(pNrFiltersList, pKernelWidthList, pStridesList, pPaddingList)):
         convParamDict = dict()
         convParamDict["name"] = "conv1D_" + str(i + 1)
         convParamDict["filters"] = nr_filters
         convParamDict["kernel_size"] = kernelWidth
+        convParamDict["strides"] = strides
+        convParamDict["padding"] = padding
         convParamDict["activation"] = "sigmoid"
         convParamDict["data_format"]="channels_last"
-        if kernelWidth > 1:
-            convParamDict["padding"] = "same"
         x = Conv1D(**convParamDict)(x)
     #flatten the output from the convolutions
     x = Flatten(name="flatten_1")(x)

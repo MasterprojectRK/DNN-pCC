@@ -60,7 +60,7 @@ def prediction(validationmatrix,
         raise SystemExit(msg)
     try:
         windowsize = int(trainParamDict["windowsize"])
-        binSizeInt = int(trainParamDict["binsize"])
+        matrix_binsize = int(trainParamDict["binsize"])
         batchSizeInt = int(trainParamDict["batchsize"])
         clampfactors = trainParamDict["clampfactors"] == "True"
         scalefactors = trainParamDict["scalefactors"] == "True"
@@ -95,6 +95,11 @@ def prediction(validationmatrix,
     except:
         scoreSize = None
         scoreWeight = 0.0
+    #feature binsize used to be equal to matrix binsize
+    try:
+        feature_binsize = int(trainParamDict["feature_binsize"])
+    except:
+        feature_binsize = matrix_binsize
     
     #load the trained model
     modelLoadParams = {"filepath": trainedmodel}
@@ -122,14 +127,16 @@ def prediction(validationmatrix,
                                                   matrixfilepath=validationmatrix,
                                                   chromatinFolder=chromatinpath,
                                                   sequencefilepath=sequencefile,
-                                                  binsize=binSizeInt)) 
+                                                  mode="prediction")) 
     #define the load params for the containers
     loadParams = {"scaleFeatures": scalefactors,
                   "clampFeatures": clampfactors,
                   "scaleTargets": scalematrix,
                   "windowsize": windowsize,
                   "flankingsize": flankingsize,
-                  "maxdist": maxdist}
+                  "maxdist": maxdist,
+                  "featureBinsize": feature_binsize
+                  }
     #now load the data and write TFRecords, one container at a time.
     if len(testdataContainerList) == 0:
         msg = "Exiting. No data found"
@@ -177,7 +184,7 @@ def prediction(validationmatrix,
     #they are ordered by chromosome names
     #first find the chrom lengths in bins
     chrLengthList = [container.chromSize_factors for container in testdataContainerList]
-    chrLengthList = [int(np.ceil(entry / binSizeInt)) - (2*flankingsize + windowsize) + 1 for entry in chrLengthList]
+    chrLengthList = [int(np.ceil(entry / matrix_binsize)) - (2*flankingsize + windowsize) + 1 for entry in chrLengthList]
     if sum(chrLengthList) != predMatrixArray.shape[0]:
         msg = "Aborting. Failed separating prediction into single chromosomes"
         raise SystemExit(msg)
@@ -199,7 +206,7 @@ def prediction(validationmatrix,
     coolerMatrixName = os.path.join(outputpath, "predMatrix.cool")
     metadata = {"trainParams": trainParamDict, "predParams": predParamDict}
     utils.writeCooler(pMatrixList=matrixPerChromList,
-                     pBinSizeInt=binSizeInt,
+                     pBinSizeInt=matrix_binsize,
                      pOutfile=coolerMatrixName,
                      pChromosomeList=chromNameList,
                      pMetadata=metadata)
@@ -208,10 +215,10 @@ def prediction(validationmatrix,
         bedgraphFileName = "scorePrediction_ds{:d}.bedgraph".format(scoreSize)            
         bedgraphFileName = os.path.join(outputpath, bedgraphFileName)
         scoreList = [utils.computeScore(pMatrix=i, pDiamondsize=scoreSize) for i in tqdm(matrixPerChromList, desc="computing scores")]
-        chromSizeList = [i.shape[0] * binSizeInt for i in matrixPerChromList]
+        chromSizeList = [i.shape[0] * matrix_binsize for i in matrixPerChromList]
         utils.saveInsulationScoreToBedgraph(scoreArrayList=scoreList, 
                                             chromSizeList=chromSizeList, 
-                                            binsize=binSizeInt,
+                                            binsize=matrix_binsize,
                                             diamondsize=scoreSize,
                                             chromosomeList=chromNameList,
                                             filename=bedgraphFileName)

@@ -9,8 +9,8 @@ from tqdm import tqdm
 import pandas as pd
 
 class DataContainer():
-    def __init__(self, chromosome, matrixfilepath, chromatinFolder, sequencefilepath, binsize=None):
-        self.chromosome = str(chromosome)
+    def __init__(self, chromosome: str, matrixfilepath: str, chromatinFolder: str, sequencefilepath: str, mode: str = "prediction"):
+        self.chromosome = chromosome
         self.matrixfilepath = matrixfilepath
         self.chromatinFolder = chromatinFolder
         self.sequencefilepath = sequencefilepath
@@ -18,9 +18,8 @@ class DataContainer():
         self.nr_factors = None
         self.sparseHiCMatrix = None
         self.sequenceArray = None
-        self.binsize = None
-        if matrixfilepath is None: #otherwise it will be defined by the Hi-C matrix itself upon loading
-            self.binsize = binsize
+        self.feature_binsize = None
+        self.matrix_binsize = None
         self.factorNames = None
         self.prefixDict_factors = None
         self.prefixDict_matrix = None
@@ -35,15 +34,13 @@ class DataContainer():
         self.flankingsize = None
         self.maxdist = None
         self.data_loaded = False
+        self.mode = mode
 
-    def __loadFactorData(self, ignoreChromLengths=False, scaleFeatures=False, clampFeatures=False):
+    def __loadFactorData(self, featureBinsize, ignoreChromLengths=False, scaleFeatures=False, clampFeatures=False):
         #load chromatin factor data from bigwig files
         if self.chromatinFolder is None:
             return
-        #ensure that binsizes for matrix (if given) and factors match
-        if self.binsize is None:
-            msg = "No binsize given; use a Hi-C matrix or explicitly specify binsize for the container"   
-            raise TypeError(msg)
+
         ###load data for a specific chromsome
         #get the names of the bigwigfiles
         bigwigFileList = utils.getBigwigFileList(self.chromatinFolder)
@@ -91,7 +88,18 @@ class DataContainer():
         self.nr_factors = len(self.factorNames)
         self.prefixDict_factors = prefixDict_factors
         self.chromSize_factors = chromSize_factors
-        nr_bins = int( np.ceil(self.chromSize_factors / self.binsize) )
+        self.feature_binsize = featureBinsize
+        if self.matrix_binsize is not None and self.matrix_binsize % self.feature_binsize != 0:
+            msg = "Error: Matrix binsize must be an integer multiple of feature binsize"
+            raise ValueError(msg)
+        elif self.matrix_binsize is not None and self.matrix_binsize < self.feature_binsize:
+            msg = "Error: Matrix binsize must be greater than or equal to feature binsize"
+            raise ValueError(msg)
+        #if no matrix loaded yet, we can set the binsize the same
+        #upon loading matrix, this will be overwritten
+        elif self.matrix_binsize is None:
+            self.matrix_binsize = featureBinsize
+        nr_bins = int( np.ceil(self.chromSize_factors / self.feature_binsize) )
         self.FactorDataArray = np.empty(shape=(len(bigwigFileList),nr_bins))
         msg = "Loaded {:d} chromatin features from folder {:s}\n"
         msg = msg.format(self.nr_factors, self.chromatinFolder)
@@ -99,7 +107,7 @@ class DataContainer():
         for i, bigwigFile in enumerate(bigwigFileList):
             chromname = self.prefixDict_factors[bigwigFile] + self.chromosome
             tmpArray = utils.binChromatinFactor(pBigwigFileName=bigwigFile,
-                                                pBinSizeInt=self.binsize,
+                                                pBinSizeInt=self.feature_binsize,
                                                 pChromStr=chromname,
                                                 pChromSize=self.chromSize_factors)
             if clampFeatures:
@@ -139,14 +147,14 @@ class DataContainer():
             raise IOError(msg)
         self.chromSize_matrix = chromsize_matrix
         #ensure that binsizes for matrix and factors (if given) match
-        if self.binsize is None or self.binsize == binsize:
-            self.binsize = binsize
-            self.sparseHiCMatrix = sparseHiCMatrix
-        elif self.binsize is not None and self.binsize != binsize:
-            msg = "Matrix has wrong binsize\n"
-            msg += "Matrix: {:d} -- Binned chromatin factors {:d}"
-            msg = msg.format(binsize, self.binsize)
-            raise IOError(msg)
+        self.matrix_binsize = binsize
+        self.sparseHiCMatrix = sparseHiCMatrix
+        if self.feature_binsize is not None and self.matrix_binsize % self.feature_binsize != 0:
+            msg = "Error: matrix binsize must be an integer multiple of factor binsize"
+            raise ValueError(msg)
+        elif self.feature_binsize is not None and self.matrix_binsize < self.feature_binsize:
+            msg = "Error: matrix binsize must be greater than or equal to factor binsize"
+            raise ValueError(msg)
         msg = "Loaded cooler matrix {:s}\n".format(self.matrixfilepath)
         msg += "chr. {:s}, matshape {:d}*{:d} -- min. {:d} -- max. {:d} -- nnz. {:d}"
         msg = msg.format(self.chromosome, self.sparseHiCMatrix.shape[0], self.sparseHiCMatrix.shape[1], int(self.sparseHiCMatrix.min()), int(self.sparseHiCMatrix.max()), self.sparseHiCMatrix.getnnz() )
@@ -193,7 +201,7 @@ class DataContainer():
         seqStr = records[chromname].seq.upper()
         self.sequenceSymbols = set(list(seqStr))
         originalLength = len(seqStr)
-        self.sequenceArray = utils.fillEncodedSequence(utils.encodeSequence(seqStr, self.sequenceSymbols), self.binsize)
+        self.sequenceArray = utils.fillEncodedSequence(utils.encodeSequence(seqStr, self.sequenceSymbols), self.matrix_binsize)
         del seqStr
         records.close()
         msg = "Loaded DNA sequence from {:s} -- Len {:d} -- Symbols {:s}"
@@ -222,14 +230,14 @@ class DataContainer():
         self.maxdist = None
         self.data_loaded = False
     
-    def loadData(self, windowsize, flankingsize=None, maxdist=None, scaleFeatures=False, clampFeatures=False, scaleTargets=False):
+    def loadData(self, windowsize, featureBinsize, flankingsize=None, maxdist=None, scaleFeatures=False, clampFeatures=False, scaleTargets=False):
         if not isinstance(windowsize, int):
             msg = "windowsize must be integer"
             raise TypeError(msg)
         if isinstance(maxdist, int):
             maxdist = np.clip(maxdist, a_min=1, a_max=self.windowsize)
         self.__loadMatrixData(scaleMatrix=scaleTargets)
-        self.__loadFactorData(scaleFeatures=scaleFeatures, clampFeatures=clampFeatures)
+        self.__loadFactorData(featureBinsize=featureBinsize, scaleFeatures=scaleFeatures, clampFeatures=clampFeatures)
         self.__loadSequenceData()
         self.windowsize = windowsize
         self.flankingsize = flankingsize
@@ -266,6 +274,8 @@ class DataContainer():
         #if chromatin factors are present, the numbers and names of chromatin factors must match
         factorsOK = factorsOK and (self.nr_factors == container.nr_factors)
         factorsOK = factorsOK and (self.factorNames == container.factorNames)
+        if isinstance(self.matrix_binsize, int):
+            factorsOK = factorsOK and (self.matrix_binsize//self.feature_binsize == container.matrix_binsize//container.feature_binsize)
         #sanity check loading of DNA sequences
         if self.sequencefilepath is not None and self.sequenceSymbols is None:
             return False
@@ -276,7 +286,7 @@ class DataContainer():
         #if DNA sequences are present, the binsizes must match
         #because the input shape of the network depends on it
         if self.sequencefilepath is not None:
-            sequenceOK = sequenceOK and (self.binsize == container.binsize)
+            sequenceOK = sequenceOK and (self.matrix_binsize == container.matrix_binsize)
         return factorsOK and matrixOK and sequenceOK and windowsizeOK and flankingsizeOK and maxdistOK
         
     def writeTFRecord(self, pOutfolder, pRecordSize=None):
@@ -324,18 +334,47 @@ class DataContainer():
     def getNumberSamples(self):
         if not self.data_loaded:
             return None
+        binsizeDiffFactor = 1
+        if isinstance(self.feature_binsize, int) and isinstance(self.matrix_binsize, int):
+            binsizeDiffFactor = self.matrix_binsize // self.feature_binsize
         featureArrays = [self.FactorDataArray, self.sparseHiCMatrix, self.sequenceArray]
-        cutouts = [self.windowsize+2*self.flankingsize, self.windowsize+2*self.flankingsize, (self.windowsize+2*self.flankingsize)*self.binsize]
+        winsizes = [(self.windowsize+2*self.flankingsize)*binsizeDiffFactor, self.windowsize+2*self.flankingsize, (self.windowsize+2*self.flankingsize)*self.matrix_binsize]
+        stepsizes = [binsizeDiffFactor, 1, 1]
         nr_samples_list = []
-        for featureArray, cutout in zip(featureArrays, cutouts):
+        for featureArray, winsize, stepsize in zip(featureArrays, winsizes, stepsizes):
             if featureArray is not None:
-                nr_samples_list.append(featureArray.shape[0] - cutout + 1)
+                nr_samples_list.append((featureArray.shape[0] - winsize + stepsize)//stepsize)
             else:
                 nr_samples_list.append(0)
         #check if all features have the same number of samples
-        if len(set( [x for x in nr_samples_list if x>0] )) != 1:
-            msg = "Error: sample binning / DNA sequence encoding went wrong"
-            raise RuntimeError(msg)
+        if nr_samples_list[0] > 0 and nr_samples_list[1] > 0 and nr_samples_list[0] == nr_samples_list[1]:
+            pass
+        #if the proteins are binned with different resolution than the matrix, 
+        #then the number of samples might differ by one
+        #example situations, with matrix binsize "b" = 5x feature binsize "a" and matrix windowsize = 2
+        #b1    b2    b3    b4    b5       matrix bins  
+        #aaaaa aaaaa aaaaa aaaaa aaaaa    => 25a >= genomesize >= 24a:  same number of samples corresponding to matrix samples (b1,b2), (b2,b3), (b3,b4) (b4,b5)
+        #aaaaa aaaaa aaaaa aaaaa aaaa     => 24a > genomesize >= 23a: last sample incomplete, only 2 samples
+        #aaaaa aaaaa aaaaa aaaaa aaa      => 23a > genomesize >= 22a: last sample incomplete, again only 2 samples
+        #etc. - always one sample less
+        elif nr_samples_list[0] > 0 and nr_samples_list[1] > 0 and nr_samples_list[0] == nr_samples_list[1] - 1:
+            #for training or validation, it is sufficient to just reduce the number of samples by one 
+            #and leave out the last sample
+            if self.mode == "training" or self.mode == "validation":
+                nr_samples_list[1] -= 1
+                msg = "Info: leaving out one sample due to different binsizes matrix / chrom. features"
+                print(msg)
+            #for prediction, this is not good, as the predicted matrix will then be one binsize smaller than its actual size
+            #it is in this case better to fill with zeros
+            else:
+                msg = "Info: filling last feature bins with zeros (diff. binsizes matrix / chrom. feats)"
+                print(msg)
+                target_size_bp = self.matrix_binsize * self.sparseHiCMatrix.shape[0]
+                actual_feature_size_bp = self.FactorDataArray.shape[0] * self.feature_binsize
+                diff_bins = int( np.ceil( (target_size_bp - actual_feature_size_bp) / self.feature_binsize) )
+                assert diff_bins < (binsizeDiffFactor)
+                zeros = np.zeros((diff_bins, self.FactorDataArray.shape[1]), dtype=self.FactorDataArray.dtype)
+                self.FactorDataArray = np.concatenate([self.FactorDataArray, zeros], axis=0 )
         return max(nr_samples_list)
 
     def __getMatrixData(self, idx):
@@ -369,8 +408,8 @@ class DataContainer():
         flankingsize = self.flankingsize
         if flankingsize is None:
             flankingsize = windowsize
-        startInd = idx + flankingsize * self.binsize
-        stopInd = startInd + windowsize * self.binsize
+        startInd = idx + flankingsize * self.matrix_binsize
+        stopInd = startInd + windowsize * self.matrix_binsize
         seqArray = self.sequenceArray[startInd:stopInd,:]
         return seqArray
 
@@ -385,8 +424,11 @@ class DataContainer():
         flankingsize = self.flankingsize
         if flankingsize is None:
             flankingsize = windowsize
-        startInd = idx
-        stopInd = startInd + 2*flankingsize + windowsize
+        resolutionFactor = 1
+        if isinstance(self.matrix_binsize, int):
+            resolutionFactor = self.matrix_binsize//self.feature_binsize
+        startInd = idx * resolutionFactor
+        stopInd = startInd + (2*flankingsize + windowsize) * resolutionFactor
         factorArray = self.FactorDataArray[startInd:stopInd,:]
         return factorArray
 
@@ -419,7 +461,7 @@ class DataContainer():
                                         pFeatureNameList=self.factorNames,
                                         pChromatinFolder=self.chromatinFolder,
                                         pChrom=self.chromosome,
-                                        pBinsize=self.binsize,
+                                        pBinsize=self.feature_binsize,
                                         pStartbin=startBin,
                                         pOutputPath=outpath,
                                         pPlotType=plotType,
@@ -436,7 +478,7 @@ class DataContainer():
             raise ValueError(msg)
         #compute the bin index from the position
         elif isinstance(position, int):
-            idx = int(np.floor(position / self.binsize))
+            idx = int(np.floor(position / self.feature_binsize))
         else:
             idx = None
         return self.plotFeatureAtIndex(idx=idx,
