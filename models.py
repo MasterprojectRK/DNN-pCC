@@ -240,9 +240,10 @@ class ConversionModel():
                 convParamDict["padding"] = "same"
             x = Conv1D(**convParamDict)(x)
             x = tf.keras.layers.BatchNormalization()(x)
-            x = tf.keras.layers.Activation("sigmoid")(x)
+            x = tf.keras.layers.LeakyReLU()(x)
         #make the shape of a 2D-image
-        x = Conv1D(filters=64, strides=3, kernel_size=4, data_format="channels_last", activation="sigmoid", padding="same", name="conv1D_final")(x)
+        x = Conv1D(filters=64, strides=3, kernel_size=4, data_format="channels_last", padding="same", name="conv1D_final")(x)
+        x = tf.keras.layers.LeakyReLU()(x)
         y = tf.keras.layers.Permute((2,1))(x)
         z = tf.keras.layers.Lambda(lambda x1: -1*tf.linalg.band_part(x1, 0, 0))(x)
         x = tf.keras.layers.Add()([x, y, z])
