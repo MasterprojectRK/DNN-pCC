@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Conv1D, Conv2D,Dense,Dropout,Flatten,Concatenate,MaxPool1D,Activation
+from tensorflow.keras.layers import BatchNormalization, Conv1D, Conv2D, Conv2DTranspose, Dense,Dropout,Flatten,Concatenate,MaxPool1D,Activation, ReLU, LeakyReLU
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras import Input
 from tensorflow.keras.applications import vgg16
@@ -80,6 +80,8 @@ class ConversionModel():
             sequentialModel = True
         elif self.model_type == "crazy":
             return self.__buildCrazyModel()
+        elif self.model_type == "uNet":
+            return self.uNetGen()
         
         if sequentialModel == True:
             return self.__buildSequentialModel(
@@ -281,6 +283,92 @@ class ConversionModel():
         for layer in perceptionModel.layers:
             layer.trainable = False
         return perceptionModel
+
+    @staticmethod
+    def downsample(filters, size, apply_batchnorm=True):
+        initializer = tf.random_normal_initializer(0., 0.02)
+        result = tf.keras.Sequential()
+        result.add(Conv2D(filters, size, strides=2, padding='same',
+                                kernel_initializer=initializer, use_bias=False))
+        if apply_batchnorm:
+            result.add(BatchNormalization())
+        result.add(LeakyReLU())
+        return result
+
+    @staticmethod
+    def upsample(filters, size, apply_dropout=False):
+        initializer = tf.random_normal_initializer(0., 0.02)
+        result = tf.keras.Sequential()
+        result.add(Conv2DTranspose(filters, size, strides=2,
+                                            padding='same',
+                                            kernel_initializer=initializer,
+                                            use_bias=False))
+        result.add(BatchNormalization())
+        if apply_dropout:
+            result.add(Dropout(0.5))
+        result.add(ReLU())
+        return result
+
+    def uNetGen(self):
+        inputs = Input(shape=(3*self.windowsize, self.nr_factors), name="factorData")
+        x = Conv1D(filters=4, kernel_size=4)(inputs)
+        x = Flatten(name="flatten_01")(x)
+        x = Dense(units=self.windowsize*(self.windowsize+1)//2)(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = CustomReshapeLayer(self.windowsize)(x)
+        x = tf.keras.layers.Reshape((self.windowsize, self.windowsize, 1))(x)
+        x_T = tf.keras.layers.Permute((2,1,3), name="transposeLayer")(x)
+        diag = tf.keras.layers.Lambda(lambda z: -1*tf.linalg.band_part(z, 0, 0), name="negativeDiagonal")(x)
+        x = tf.keras.layers.Add()([x, x_T, diag])
+        
+        down_stack = [
+            ConversionModel.downsample(64, 4, apply_batchnorm=False), # (bs, 128, 128, 64)
+            ConversionModel.downsample(128, 4), # (bs, 64, 64, 128)
+            ConversionModel.downsample(256, 4), # (bs, 32, 32, 256)
+            ConversionModel.downsample(512, 4), # (bs, 16, 16, 512)
+            ConversionModel.downsample(512, 4), # (bs, 8, 8, 512)
+            ConversionModel.downsample(512, 4), # (bs, 4, 4, 512)
+            ConversionModel.downsample(512, 4), # (bs, 2, 2, 512)
+            ConversionModel.downsample(512, 4), # (bs, 1, 1, 512)
+        ]
+
+        up_stack = [
+            ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 2, 2, 1024)
+            ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 4, 4, 1024)
+            ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 8, 8, 1024)
+            ConversionModel.upsample(512, 4), # (bs, 16, 16, 1024)
+            ConversionModel.upsample(256, 4), # (bs, 32, 32, 512)
+            ConversionModel.upsample(128, 4), # (bs, 64, 64, 256)
+            ConversionModel.upsample(64, 4), # (bs, 128, 128, 128)
+        ]
+
+        initializer = tf.random_normal_initializer(0., 0.02)
+        last = tf.keras.layers.Conv2DTranspose(1, 4,
+                                                strides=2,
+                                                padding='same',
+                                                kernel_initializer=initializer,
+                                                activation='tanh') # (bs, 256, 256, 3)
+
+        # Downsampling through the model
+        skips = []
+        for down in down_stack:
+            x = down(x)
+            skips.append(x)
+
+        skips = reversed(skips[:-1])
+
+        # Upsampling and establishing the skip connections
+        for up, skip in zip(up_stack, skips):
+            x = up(x)
+            x = tf.keras.layers.Concatenate()([x, skip])
+
+        x = last(x)
+        x_T = tf.keras.layers.Permute((2,1,3))(x)
+        diag2 = tf.keras.layers.Lambda(lambda z: -1*tf.linalg.band_part(z, 0, 0))(x)
+        x = tf.keras.layers.Add()([x, x_T, diag2])
+
+        return tf.keras.Model(inputs=inputs, outputs=x)
+        
 
     @tf.function
     def train_step(self, input_factors, target):
