@@ -376,22 +376,22 @@ class ConversionModel():
 
     def uNetGen2(self):
         initializer = tf.random_normal_initializer(0., 0.02)
+        nr_filters_list=[16,16,32,32,64,64,self.windowsize]
+        kernel_width_list=[4,4,4,4,4,4,4]
         inputs = Input(shape=(3*self.windowsize, self.nr_factors), name="factorData")
-        x = Conv1D(filters=1, kernel_size=1)(inputs)
-        x = Activation("sigmoid")(x)
-        x = Flatten(name="flatten_01")(x)
-        x = Dense(units=2*3*self.windowsize, kernel_initializer=initializer)(x)
-        x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
-        x = Dropout(rate=0.25)(x)
-        x = Dense(units=4*3*self.windowsize, kernel_initializer=initializer)(x)
-        x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
-        x = Dropout(rate=0.25)(x)
-        x = Dense(units=14*3*self.windowsize, kernel_initializer=initializer)(x)
-        x = x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
-        x = Dropout(rate=0.25)(x)
-        x = Dense(units=self.windowsize*(self.windowsize+1)//2)(x)
-        x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
-        x = CustomReshapeLayer(self.windowsize)(x)
+        x = inputs
+        for i, (nr_filters, kernelWidth) in enumerate(zip(nr_filters_list, kernel_width_list)):
+            convParamDict = dict()
+            convParamDict["name"] = "conv1D_" + str(i + 1)
+            convParamDict["filters"] = nr_filters
+            convParamDict["kernel_size"] = kernelWidth
+            convParamDict["data_format"]="channels_last"
+            if kernelWidth > 1:
+                convParamDict["padding"] = "same"
+            x = Conv1D(**convParamDict)(x)
+            x = BatchNormalization()(x)
+            x = tf.keras.layers.Activation("sigmoid")(x)
+        x = Conv1D(self.windowsize, 4, strides=3, padding="same", kernel_initializer=initializer)(x)
         x = tf.keras.layers.Reshape((self.windowsize, self.windowsize, 1))(x)
         x_T = tf.keras.layers.Permute((2,1,3), name="transposeLayer")(x)
         diag = tf.keras.layers.Lambda(lambda z: -1*tf.linalg.band_part(z, 0, 0), name="negativeDiagonal")(x)
