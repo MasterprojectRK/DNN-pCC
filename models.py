@@ -403,17 +403,17 @@ class ConversionModel():
             ConversionModel.downsample(256, 4), # (bs, 32, 32, 256)
             ConversionModel.downsample(512, 4), # (bs, 16, 16, 512)
             ConversionModel.downsample(512, 4), # (bs, 8, 8, 512)
-            ConversionModel.downsample(512, 4), # (bs, 4, 4, 512)
-            ConversionModel.downsample(512, 4), # (bs, 2, 2, 512)
+            #ConversionModel.downsample(512, 4), # (bs, 4, 4, 512)
+            #ConversionModel.downsample(512, 4), # (bs, 2, 2, 512)
             ConversionModel.downsample(512, 4, apply_batchnorm=False, leaky=False), # (bs, 1, 1, 512)
         ]
 
         up_stack = [
             ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 2, 2, 1024)
             ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 4, 4, 1024)
-            ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 8, 8, 1024)
-            ConversionModel.upsample(512, 4), # (bs, 16, 16, 1024)
-            ConversionModel.upsample(256, 4), # (bs, 32, 32, 512)
+            #ConversionModel.upsample(512, 4, apply_dropout=True), # (bs, 8, 8, 1024)
+            #ConversionModel.upsample(512, 4), # (bs, 16, 16, 1024)
+            ConversionModel.upsample(256, 4, apply_dropout=True), # (bs, 32, 32, 512)
             ConversionModel.upsample(128, 4), # (bs, 64, 64, 256)
             ConversionModel.upsample(64, 4), # (bs, 128, 128, 128)
         ]
