@@ -9,6 +9,7 @@ import csv
 import os
 from tqdm import tqdm
 import pydot # implicitly required for plotting models
+import matplotlib.pyplot as plt
 
 np.random.seed(35)
 tf.random.set_seed(35)
@@ -131,6 +132,9 @@ tf.random.set_seed(35)
                 required=False,type=click.IntRange(min=1, max=1000),
                 default=50, show_default=True,
                 help="Save the trained model every sfreq batches (1<=sfreq<=1000)")
+@click.option("--flipsamples", required=False,
+              type=bool, default=False, show_default=True,
+              help="Flip samples (data augmentation")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -164,7 +168,8 @@ def training(trainmatrices,
             earlystopping,
             debugstate,
             figuretype,
-            savefreq):
+            savefreq,
+            flipsamples):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
@@ -339,11 +344,39 @@ def training(trainmatrices,
     tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
     #build input streams
+    mirror_idxs = records.get_mirror_indices(windowsize)
     shuffleBufferSize = 3*recordsize
     trainDs = tf.data.TFRecordDataset(traindataRecords, 
                                         num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                         compression_type="GZIP")
     trainDs = trainDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    if flipsamples:
+        tds_mirrored = trainDs.map(lambda a, b: records.mirror_function(a["factorData"], b["out_matrixData"], mirror_idxs))
+        if debugstate == "Figures":
+            tk1 = list(trainDs.take(1).as_numpy_iterator())
+            tk2 = list(tds_mirrored.take(1).as_numpy_iterator())
+            tk1_facs = tk1[0][0]["factorData"]
+            tk1_mat = np.zeros((windowsize, windowsize))
+            tk1_mat[np.triu_indices(windowsize)] = tk1[0][1]["out_matrixData"]
+            tk2_facs = tk2[0][0]["factorData"]
+            tk2_mat = np.zeros_like(tk1_mat)
+            tk2_mat[np.triu_indices(windowsize)] = tk2[0][1]["out_matrixData"]
+            fig1, axs1 = plt.subplots(2,2)
+            m1 = axs1[0,0].imshow(np.log(tk1_mat + 1))
+            m2 = axs1[0,1].imshow(np.log(tk2_mat + 1))
+            m3 = axs1[1,0].imshow(tk1_facs, aspect="auto")
+            m4 = axs1[1,1].imshow(tk2_facs, aspect="auto")
+            t1 = axs1[1,0].set_title("standard")
+            t2 = axs1[1,1].set_title("flipped")
+            axs1[1,0].xaxis.set_visible(False)
+            axs1[1,1].xaxis.set_visible(False)
+            flipfigname = "flippedVsStd.{:s}".format(figuretype)
+            flipfigname = os.path.join(outputpath, flipfigname)
+            fig1.savefig(flipfigname)
+            plt.close(fig1)
+            del axs1, fig1, flipfigname, m1, m2, m3, m4, t1, t2
+            del tk1, tk1_facs, tk1_mat, tk2, tk2_facs, tk2_mat
+        trainDs = trainDs.concatenate(tds_mirrored)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
     trainDs = trainDs.batch(batchsize, drop_remainder=True)
     trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
@@ -369,8 +402,11 @@ def training(trainmatrices,
     valLossList_epochs = []
     #iterate over all epochs and batches in the train/validation datasets
     #compute gradients and update weights accordingly
+    samples_per_epoch = int(np.floor(nr_trainingSamples / batchsize))
+    if flipsamples:
+        samples_per_epoch *= 2
     for epoch in range(numberepochs):
-        pbar_batch = tqdm(trainDs, total=int(np.floor(nr_trainingSamples / batchsize)))
+        pbar_batch = tqdm(trainDs, total=samples_per_epoch)
         pbar_batch.set_description("Epoch {:05d}".format(epoch+1))
         trainLossList_batches = [] #lists to store loss for each batch
         for x, y in pbar_batch:
