@@ -109,13 +109,15 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors: int, 
         convParamDict["padding"] = padding
         convParamDict["activation"] = "sigmoid"
         convParamDict["data_format"]="channels_last"
+        convParamDict["kernel_regularizer"]=tf.keras.regularizers.l2(0.001)
         x = Conv1D(**convParamDict)(x)
     #flatten the output from the convolutions
     x = Flatten(name="flatten_1")(x)
     #add the requested number of dense layers and dropout
     for i, nr_neurons in enumerate(pNrNeuronsList):
         layerName = "dense_" + str(i+1)
-        x = Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName)(x)
+        #x = Dense(nr_neurons,activation="relu",kernel_regularizer="l2",name=layerName)(x)
+        x = Dense(nr_neurons,activation="relu",name=layerName)(x)
         layerName = "dropout_" + str(i+1)
         x = Dropout(pDropoutRate, name=layerName)(x)
     #add the output layer (corresponding to a predicted submatrix, 
@@ -125,7 +127,8 @@ def buildSequentialModel(pWindowSize, pFlankingSize, pMaxDist, pNrFactors: int, 
     nr_elements_fullMatrix = int( 1/2 * pWindowSize * (pWindowSize + 1) ) #always an int, even*odd=even 
     nr_elements_capped = int( 1/2 * diff * (diff+1) )   
     nr_outputNeurons = nr_elements_fullMatrix - nr_elements_capped
-    x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
+    #x = Dense(nr_outputNeurons,activation="relu",kernel_regularizer="l2",name="out_matrixData")(x)
+    x = Dense(nr_outputNeurons,activation="linear",name="out_matrixData")(x)
     model = Model(inputs=inputs, outputs=x)
     return model
 
