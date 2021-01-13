@@ -84,8 +84,8 @@ tf.random.set_seed(35)
                 help="Scale chromatin factor data to range 0...1 (recommended)")
 @click.option("--binsizeFactors", "-bsf", required=True,
                 type=click.IntRange(min=1000),
-                default=5000, show_default=True,
-                help="Binsize in basepairs for binning chromation features. Note that all matrices must be integer-divisible by the given value")
+                multiple=True,
+                help="Binsize in basepairs for binning chromation features. Note that the relation matrix_binsize : bsf must be the same integer for all train/validation matrices ")
 @click.option("--modelType", "-mod", required=False,
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
                 default="initial", show_default=True,
@@ -212,6 +212,9 @@ def training(trainmatrices,
         msg += "Current numbers: Matrices: {:d}; Chromatin Paths: {:d}"
         msg = msg.format(len(validationmatrices), len(validationchromatinpaths))
         raise SystemExit(msg) 
+    if len(binsizefactors) != len(trainchromatinpaths) + len(validationchromatinpaths):
+        msg = "--binsizeFactors/-bsf must be specified for each chromatin path"
+        raise SystemExit(msg)
 
     #check if chosen model type matches inputs
     modelTypeStr = checkSetModelTypeStr(modeltype, sequencefile)
@@ -246,7 +249,6 @@ def training(trainmatrices,
     loadParams = {"scaleFeatures": scalefactors,
                   "clampFeatures": clampfactors,
                   "scaleTargets": scalematrix,
-                  "featureBinsize": binsizefactors,
                   "windowsize": windowsize,
                   "flankingsize": flankingsize,
                   "maxdist": maxdist}
@@ -258,7 +260,8 @@ def training(trainmatrices,
     container0 = traindataContainerList[0]
     tfRecordFilenames = []
     nr_samples_list = []
-    for container in traindataContainerList + validationdataContainerList:
+    for container, feat_binsize in zip(traindataContainerList + validationdataContainerList, binsizefactors):
+        loadParams["featureBinsize"] = feat_binsize
         container.loadData(**loadParams)
         if not container0.checkCompatibility(container):
             msg = "Aborting. Incompatible data"
