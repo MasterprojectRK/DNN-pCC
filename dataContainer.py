@@ -321,7 +321,7 @@ class DataContainer():
         sample_indices = [sum(samples_per_file[0:i]) for i in range(len(samples_per_file)+1)] 
         #write the single files
         folderName = self.chromatinFolder.rstrip("/").replace("/","-")
-        recordfiles = [os.path.join(pOutfolder, "{:s}_{:s}_{:03d}.tfrecord".format(folderName, str(self.chromosome), i + 1)) for i in range(nr_files)]
+        recordfiles = [os.path.join(pOutfolder, "{:s}_{:s}_{:d}_{:d}_{:03d}.tfrecord".format(folderName, str(self.chromosome), self.matrix_binsize, self.feature_binsize, i + 1)) for i in range(nr_files)]
         for recordfile, firstIndex, lastIndex in tqdm(zip(recordfiles, sample_indices, sample_indices[1:]), desc="Storing TFRecord files", total=len(recordfiles)):
             recordDict, storedFeaturesDict = self.__prepareWriteoutDict(pFirstIndex=firstIndex, 
                                                                         pLastIndex=lastIndex, 

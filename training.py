@@ -265,6 +265,7 @@ def training(trainmatrices,
         container.loadData(**loadParams)
         if not container0.checkCompatibility(container):
             msg = "Aborting. Incompatible data"
+            raise SystemExit(msg)
         tfRecordFilenames.append(container.writeTFRecord(pOutfolder=outputpath,
                                                         pRecordSize=recordsize))
         if debugstate is not None:
@@ -277,7 +278,6 @@ def training(trainmatrices,
                                          figuretype=figuretype)
             container.saveMatrix(outputpath=outputpath, index=idx)
         nr_samples_list.append(container.getNumberSamples())
-        container.unloadData()
     traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
     validationdataRecords = [item for sublist in tfRecordFilenames[len(traindataContainerList):] for item in sublist]    
     
@@ -303,6 +303,10 @@ def training(trainmatrices,
     nr_trainingSamples = sum(nr_samples_list[0:len(traindataContainerList)])
     storedFeaturesDict = container0.storedFeatures
     
+    #unload the data, it is no longer required and consumes memory
+    for container in traindataContainerList + validationdataContainerList:
+        container.unloadData()
+
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
