@@ -215,6 +215,10 @@ def training(trainmatrices,
     if len(binsizefactors) != len(trainchromatinpaths) + len(validationchromatinpaths):
         msg = "--binsizeFactors/-bsf must be specified for each chromatin path"
         raise SystemExit(msg)
+    #binsize list - we have one traindata container per chrom and per matrix/chromatin path
+    #container order is chromosomes first
+    binsize_train_list = binsizefactors[:len(trainchromatinpaths)]*len(trainChromNameList)
+    binsize_val_list = binsizefactors[len(trainchromatinpaths):]*len(validationChromNameList)
 
     #check if chosen model type matches inputs
     modelTypeStr = checkSetModelTypeStr(modeltype, sequencefile)
@@ -260,7 +264,7 @@ def training(trainmatrices,
     container0 = traindataContainerList[0]
     tfRecordFilenames = []
     nr_samples_list = []
-    for container, feat_binsize in zip(traindataContainerList + validationdataContainerList, binsizefactors):
+    for container, feat_binsize in zip(traindataContainerList + validationdataContainerList, binsize_train_list + binsize_val_list):
         loadParams["featureBinsize"] = feat_binsize
         container.loadData(**loadParams)
         if not container0.checkCompatibility(container):
