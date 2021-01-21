@@ -37,27 +37,30 @@ def buildModel(pModelTypeStr, pWindowSize, pNrFactors: int, pBinSizeInt: int, pN
     elif pModelTypeStr == "wider":
         #test model with wider filters
         nrFiltersList = [1]
-        kernelSizeList = [6*pBinsizeFactor]
+        kernelSizeList = [4*pBinsizeFactor]
         nrNeuronsList = [460,881,1690]
         stridesList = [pBinsizeFactor]
         paddingList = ["same"]
         sequentialModel = True
+        dropoutRate = 0.1
     elif pModelTypeStr == "longer":
         #test model with more convolution filters
-        nrFiltersList = [6,6]
-        kernelSizeList= [pBinsizeFactor,1]
-        nrNeuronsList = [1500,2400]
-        stridesList = [pBinsizeFactor,1]
-        paddingList=["valid", "valid"]
+        nrFiltersList = [4,8,16]
+        kernelSizeList= [pBinsizeFactor,1,1]
+        nrNeuronsList = [460,881,1690]
+        stridesList = [pBinsizeFactor,1,1]
+        paddingList= ["valid", "valid", "valid"]
         sequentialModel = True
+        dropoutRate = 0.2
     elif pModelTypeStr == "wider-longer":
         #test model with more AND wider convolution filters
-        nrFiltersList = [6,6]
-        kernelSizeList= [6*pBinsizeFactor,6]
-        nrNeuronsList = [1500,2400]
-        stridesList= [pBinsizeFactor,1]
-        paddingList["same", "same"]
+        nrFiltersList = [4,8,16]
+        kernelSizeList= [4*pBinsizeFactor,4,4]
+        nrNeuronsList = [460,881,1690]
+        stridesList= [pBinsizeFactor,1,1]
+        paddingList= ["same", "same", "same"]
         sequentialModel = True
+        dropoutRate = 0.2
     
     if sequentialModel == True:
         return buildSequentialModel(pWindowSize=pWindowSize,
