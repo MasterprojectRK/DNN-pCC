@@ -1,16 +1,17 @@
 import utils
 import models
 import records
+import dataContainer
 import click
 import tensorflow as tf
 import numpy as np
 import csv
 import os
 from tqdm import tqdm
+import pydot # implicitly required for plotting models
+import matplotlib.pyplot as plt
 
-from numpy.random import seed
-seed(35)
-
+np.random.seed(35)
 tf.random.set_seed(35)
 
 @click.option("--trainMatrices","-tm",required=True,
@@ -64,6 +65,12 @@ tf.random.set_seed(35)
                 type=click.IntRange(min=10), 
                 default=80, show_default=True,
                 help="Window size (in bins) for composing training data")
+@click.option("--flankingsize", "-fs", required=False,
+                type=click.IntRange(min=10),
+                help="Size of flanking regions left/right of window in bins. Equal to windowsize if not set")
+@click.option("--maxdist", "-md", required=False,
+                type=click.IntRange(min=1),
+                help="Training window can be capped at this distance (in bins). Equal to windowsize if not set")
 @click.option("--scaleMatrix", "-scm", required=False,
                 type=bool, 
                 default=False, show_default=True,
@@ -75,18 +82,41 @@ tf.random.set_seed(35)
 @click.option("--scaleFactors","-scf", required=False,
                 type=bool, default=True,
                 help="Scale chromatin factor data to range 0...1 (recommended)")
+@click.option("--binsizeFactors", "-bsf", required=True,
+                type=click.IntRange(min=1000),
+                multiple=True,
+                help="Binsize in basepairs for binning chromation features. Note that the relation matrix_binsize : bsf must be the same integer for all train/validation matrices ")
 @click.option("--modelType", "-mod", required=False,
                 type=click.Choice(["initial", "wider", "longer", "wider-longer", "sequence"]),
                 default="initial", show_default=True,
                 help="Type of model to use")
+@click.option("--scoreWeight", "-scw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for insulation score loss (matrix loss is 1.0). Default 0.0 means score loss is not used")
+@click.option("--scoreSize", "-ssz", required=False,
+                type=click.IntRange(min=1), 
+                help="Size for computation of insulation score loss. Must be (much) smaller than windowsize. Only relevant, if scoreWeight > 0")
+@click.option("--tvWeight", "-tvw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for Total Variation loss. Default 0.0 means TV loss is not used")
+@click.option("--structureWeight", "-stw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for MS-SSIM loss. Default 0.0 means MS-SSIM loss is not used")
+@click.option("--perceptionWeight", "-pcw", required=False,
+                type=click.FloatRange(min=0.0), default=0.0, show_default=True,
+                help="Weight for perception loss. Default 0.0 means perception loss is not used")
 @click.option("--optimizer", "-opt", required=False,
                 type=click.Choice(["SGD", "Adam", "RMSprop"]),
                 default="SGD", show_default=True,
-                help="Optimizer to use: SGD, Adam, RMSprop or cosine similarity.")
+                help="Optimizer to use: SGD (recommended), Adam or RMSprop")
 @click.option("--loss", "-l", required=False,
-                type=click.Choice(["MSE", "MAE", "MAPE", "MSLE", "Cosine"]),
+                type=click.Choice(["MSE", "Huber0.1", "Huber0.5", "Huber1.0", "Huber5.0", "Huber10.0" "Huber100.0", "Huber1000.0", "MAE", "MAPE", "MSLE", "Cosine"]),
                 default="MSE", show_default=True,
-                help="Loss function to use, Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity.")
+                help="Loss function to use for per-pixel loss: Mean Squared-, Mean Absolute-, Mean Absolute Percentage-, Mean Squared Logarithmic Error or Cosine similarity.")
+@click.option("--pixelLossWeight", "-plw", required=False,
+                type=click.FloatRange(min=0.0),
+                default=1.0, show_default=True,
+                help="Weight for per-pixel loss, default of 1.0 should not be exceeded in most cases")
 @click.option("--earlyStopping", "-early",
                 required=False, type=click.IntRange(min=5),
                 help="patience for early stopping, stop after this number of epochs w/o improvement in validation loss")
@@ -102,6 +132,9 @@ tf.random.set_seed(35)
                 required=False,type=click.IntRange(min=1, max=1000),
                 default=50, show_default=True,
                 help="Save the trained model every sfreq batches (1<=sfreq<=1000)")
+@click.option("--flipsamples", required=False,
+              type=bool, default=False, show_default=True,
+              help="Flip samples (data augmentation")
 @click.command()
 def training(trainmatrices,
             trainchromatinpaths,
@@ -117,21 +150,54 @@ def training(trainmatrices,
             batchsize,
             recordsize,
             windowsize,
+            flankingsize,
+            maxdist,
             scalematrix,
             clampfactors,
             scalefactors,
+            binsizefactors,
             modeltype,
+            scoreweight,
+            scoresize,
+            tvweight,
+            structureweight,
+            perceptionweight,
             optimizer,
             loss,
+            pixellossweight,
             earlystopping,
             debugstate,
             figuretype,
-            savefreq):
+            savefreq,
+            flipsamples):
     #save the input parameters so they can be written to csv later
     paramDict = locals().copy()
 
     if debugstate is not None and debugstate != "Figures":
         debugstate = int(debugstate)
+
+    if maxdist is not None:
+        maxdist = min(windowsize, maxdist)
+        paramDict["maxdist"] = maxdist
+
+    if flankingsize is None:
+        flankingsize = windowsize
+        paramDict["flankingsize"] = flankingsize
+    
+    if scoresize is None and scoreweight > 0.0:
+        scoresize = int(windowsize * 0.25)
+        paramDict["scoresize"] = scoresize
+
+    #workaround for AlreadyExistsException when using perception loss
+    #root cause seems to be a bug in grappler?
+    if perceptionweight > 0.0:
+        tf.config.optimizer.set_experimental_options({"arithmetic_optimization": False})
+
+    trainChromNameList = trainchromosomes.rstrip().split(" ")  
+    trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
+
+    validationChromNameList = validationchromosomes.rstrip().split(" ")
+    validationChromNameList = sorted([x.lstrip("chr") for x in validationChromNameList])
 
     #number of train matrices must match number of chromatin paths
     #this is useful for training on matrices and chromatin factors 
@@ -146,169 +212,132 @@ def training(trainmatrices,
         msg += "Current numbers: Matrices: {:d}; Chromatin Paths: {:d}"
         msg = msg.format(len(validationmatrices), len(validationchromatinpaths))
         raise SystemExit(msg) 
-
-    #extract chromosome names and size from the input
-    trainChromNameList = trainchromosomes.rstrip().split(" ")  
-    trainChromNameList = sorted([x.lstrip("chr") for x in trainChromNameList])  
-    #check if all requested chroms are present in all train matrices
-    trainMatricesDict = utils.checkGetChromsPresentInMatrices(trainmatrices,trainChromNameList)
-    #check if all requested chroms are present in all bigwig files
-    #and check if the chromosome lengths are equal for all bigwig files in each folder
-    trainChromFactorsDict = utils.checkGetChromsPresentInFactors(trainchromatinpaths,trainChromNameList)
-    #check if the chromosome lengths from the bigwig files match the ones from the matrices
-    utils.checkChromSizesMatching(trainMatricesDict, trainChromFactorsDict, trainChromNameList)
-
-    #repeat the steps above for the validation matrices and chromosomes
-    validationChromNameList = validationchromosomes.rstrip().split(" ")
-    validationChromNameList = sorted([x.lstrip("chr") for x in validationChromNameList])
-    validationMatricesDict = utils.checkGetChromsPresentInMatrices(validationmatrices, validationChromNameList)
-    validationChromFactorsDict = utils.checkGetChromsPresentInFactors(validationchromatinpaths, validationChromNameList)
-    utils.checkChromSizesMatching(validationMatricesDict, validationChromFactorsDict, validationChromNameList)
+    if len(binsizefactors) != len(trainchromatinpaths) + len(validationchromatinpaths):
+        msg = "--binsizeFactors/-bsf must be specified for each chromatin path"
+        raise SystemExit(msg)
+    #binsize list - we have one traindata container per chrom and per matrix/chromatin path
+    #container order is chromosomes first
+    binsize_train_list = binsizefactors[:len(trainchromatinpaths)]*len(trainChromNameList)
+    binsize_val_list = binsizefactors[len(trainchromatinpaths):]*len(validationChromNameList)
 
     #check if chosen model type matches inputs
     modelTypeStr = checkSetModelTypeStr(modeltype, sequencefile)
     paramDict["modeltype"] = modelTypeStr
 
-    #load sparse Hi-C matrices per chromosome
-    #scale and normalize, if requested
-    print("Loading Training matrix/matrices")
-    utils.loadMatricesPerChrom(trainMatricesDict, scalematrix, windowsize)
-    print("\nLoading Validation matrix/matrices")
-    utils.loadMatricesPerChrom(validationMatricesDict, scalematrix, windowsize)
-
-    #load, bin and aggregate the chromatin factors into a numpy array
-    #of size #matrix_size_in_bins x nr_chromatin_factors
-    #loading is per corresponding training matrix (per folder)
-    #and the bin sizes also correspond to the matrices
-    print("\nLoading Chromatin factors for training")
-    utils.loadChromatinFactorDataPerMatrix(trainMatricesDict,trainChromFactorsDict, trainChromNameList, pScaleFactors=scalefactors, pClampFactors=clampfactors)
-    print("\nLoading Chromatin factors for validation")
-    utils.loadChromatinFactorDataPerMatrix(validationMatricesDict, validationChromFactorsDict, validationChromNameList, pScaleFactors=scalefactors, pClampFactors=clampfactors)
+    #select the correct class for the data container
+    containerCls = dataContainer.DataContainer
     
-    if debugstate is not None:
-        for plotType in ["box", "line"]:
-            utils.plotChromatinFactors(pFactorDict=trainChromFactorsDict,
-                                        pMatrixDict=trainMatricesDict,
-                                        pOutputPath=outputpath,
-                                        pPlotType=plotType,
-                                        pFigureType=figuretype)
-            utils.plotChromatinFactors(pFactorDict=validationChromFactorsDict,
-                                        pMatrixDict=validationMatricesDict,
-                                        pOutputPath=outputpath,
-                                        pPlotType=plotType,
-                                        pFigureType=figuretype)
+    #prepare the training data containers. No data is loaded yet.
+    traindataContainerList = []
+    for chrom in trainChromNameList:
+        for matrix, chromatinpath in zip(trainmatrices, trainchromatinpaths):
+            container = containerCls(chromosome=chrom,
+                                    matrixfilepath=matrix,
+                                    chromatinFolder=chromatinpath,
+                                    sequencefilepath=sequencefile,
+                                    mode="training")
+            traindataContainerList.append(container)
 
-    #check if DNA sequences for all chroms are there and correspond with matrices/chromatin factors
-    #do not load them in memory yet, only store paths and sequence ids in the dicts
-    #the generator can then load sequence data as required
-    utils.getCheckSequences(trainMatricesDict,trainChromFactorsDict, sequencefile)
-    utils.getCheckSequences(validationMatricesDict, validationChromFactorsDict, sequencefile)
+    #prepare the validation data containers. No data is loaded yet.
+    validationdataContainerList = []
+    for chrom in validationChromNameList:
+        for matrix, chromatinpath in zip(validationmatrices, validationchromatinpaths):
+            container = containerCls(chromosome=chrom,
+                                    matrixfilepath=matrix,
+                                    chromatinFolder=chromatinpath,
+                                    sequencefilepath=sequencefile,
+                                    mode="validation")
+            validationdataContainerList.append(container)
+
+    #define the load params for the containers
+    loadParams = {"scaleFeatures": scalefactors,
+                  "clampFeatures": clampfactors,
+                  "scaleTargets": scalematrix,
+                  "windowsize": windowsize,
+                  "flankingsize": flankingsize,
+                  "maxdist": maxdist}
+    #now load the data and write TFRecords, one container at a time.
+    if len(traindataContainerList) == 0:
+        msg = "Exiting. No data found"
+        print(msg)
+        return #nothing to do
+    container0 = traindataContainerList[0]
+    tfRecordFilenames = []
+    nr_samples_list = []
+    for container, feat_binsize in zip(traindataContainerList + validationdataContainerList, binsize_train_list + binsize_val_list):
+        loadParams["featureBinsize"] = feat_binsize
+        container.loadData(**loadParams)
+        if not container0.checkCompatibility(container):
+            msg = "Aborting. Incompatible data"
+            raise SystemExit(msg)
+        tfRecordFilenames.append(container.writeTFRecord(pOutfolder=outputpath,
+                                                        pRecordSize=recordsize))
+        if debugstate is not None:
+            if isinstance(debugstate, int):
+                idx = debugstate
+            else:
+                idx = None
+            container.plotFeatureAtIndex(idx=idx,
+                                         outpath=outputpath,
+                                         figuretype=figuretype)
+            container.saveMatrix(outputpath=outputpath, index=idx)
+        nr_samples_list.append(container.getNumberSamples())
+    traindataRecords = [item for sublist in tfRecordFilenames[0:len(traindataContainerList)] for item in sublist]
+    validationdataRecords = [item for sublist in tfRecordFilenames[len(traindataContainerList):] for item in sublist]    
     
-    #get number and names of chromatin factors 
-    #and save to parameters dictionary
-    nr_factors = max([trainChromFactorsDict[folder]["nr_factors"] for folder in trainChromFactorsDict])
-    paramDict["nr_factors"] = nr_factors
-    factorsNameList = []
-    for folder in trainChromFactorsDict:
-        factorsNameList.extend([name for name in trainChromFactorsDict[folder]["bigwigs"]])
-    factorsNameList = sorted(list(set(factorsNameList)))
-    for i, factor in enumerate(factorsNameList):
-        paramDict["chromFactor_" + str(i)] = factor
-    #get binsize and save to parameters dictionary
-    binsize = max([trainMatricesDict[mName]["binsize"] for mName in trainMatricesDict])
+
+    #different binsizes are ok, as long as no sequence is used
+    #not clear which binsize to use for prediction when they differ during training.
+    #For now, store the max. 
+    binsize = max([container.matrix_binsize for container in traindataContainerList])
     paramDict["binsize"] = binsize
-    #get number of symbols and save to parameters dictionary
+    feature_binsize = max([container.feature_binsize for container in traindataContainerList])
+    paramDict["feature_binsize"] = feature_binsize
+    #because of compatibility checks above, 
+    #the following properties are the same with all containers,
+    #so just use data from first container
+    nr_factors = container0.nr_factors
+    paramDict["nr_factors"] = nr_factors
+    for i in range(nr_factors):
+        paramDict["chromFactor_" + str(i)] = container0.factorNames[i]
+    sequenceSymbols = container0.sequenceSymbols
     nr_symbols = None
-    if sequencefile is not None:
-        nr_symbols =max([len(trainMatricesDict[mName]["seqSymbols"]) for mName in trainMatricesDict])
-    paramDict["nr_symbols"] = nr_symbols
+    if isinstance(sequenceSymbols, set):
+        nr_symbols = len(sequenceSymbols)
+    nr_trainingSamples = sum(nr_samples_list[0:len(traindataContainerList)])
+    storedFeaturesDict = container0.storedFeatures
+    
+    #unload the data, it is no longer required and consumes memory
+    for container in traindataContainerList + validationdataContainerList:
+        container.unloadData()
 
-
-    #generators for training and validation data
-    trainDataGenerator = models.multiInputGenerator(matrixDict=trainMatricesDict,
-                                                        factorDict=trainChromFactorsDict,
-                                                        batchsize=recordsize,
-                                                        windowsize=windowsize,
-                                                        binsize=binsize,
-                                                        shuffle=False) #done in dataset)
-    validationDataGenerator = models.multiInputGenerator(matrixDict=validationMatricesDict,
-                                                        factorDict=validationChromFactorsDict,
-                                                        batchsize=recordsize,
-                                                        windowsize=windowsize,
-                                                        binsize=binsize,
-                                                        shuffle=False)    
-
-    #write the training data to disk as tfRecord
-    trainFilenameList = ["trainfile_{:03d}.tfrecord".format(i+1) for i in range(len(trainDataGenerator))]
-    trainFilenameList = [os.path.join(outputpath, x) for x in trainFilenameList]
-    nr_samples = 0
-    for i, batch in enumerate(tqdm(trainDataGenerator,desc="generating training data")):
-        if len(batch[0]) == 1:
-            records.writeTFRecord(batch[0][0], None, batch[1], trainFilenameList[i])
-        else:
-            records.writeTFRecord(batch[0][0], batch[0][1], batch[1], trainFilenameList[i])
-        nr_samples += batch[1].shape[0]
-    #write the validation data to disk as tfRecord
-    validationFilenameList = ["validationfile_{:03d}.tfrecord".format(i+1) for i in range(len(validationDataGenerator))]
-    validationFilenameList = [os.path.join(outputpath, x) for x in validationFilenameList]
-    for i, batch in enumerate(tqdm(validationDataGenerator, desc="generating validation data")):
-        if len(batch[0]) == 1:
-            records.writeTFRecord(batch[0][0], None, batch[1], validationFilenameList[i])
-        else:
-            records.writeTFRecord(batch[0][0], batch[0][1], batch[1], validationFilenameList[i])
     #build the requested model
     model = models.buildModel(pModelTypeStr=modelTypeStr, 
                                     pWindowSize=windowsize,
                                     pBinSizeInt=binsize,
                                     pNrFactors=nr_factors,
-                                    pNrSymbols=nr_symbols)
-    #create optimizer
-    kerasOptimizer = None
-    if optimizer == "SGD":
-        kerasOptimizer = tf.keras.optimizers.SGD(learning_rate=learningrate)
-    elif optimizer == "Adam":
-        kerasOptimizer = tf.keras.optimizers.Adam(learning_rate=learningrate)
-    elif optimizer == "RMSprop":
-        kerasOptimizer = tf.keras.optimizers.RMSprop(learning_rate=learningrate)
-    else:
-        raise NotImplementedError("unknown optimizer")
-    #create loss
-    loss_fn = None
-    if loss == "MSE":
-        loss_fn = tf.keras.losses.MeanSquaredError()
-    elif loss == "MAE":
-        loss_fn = tf.keras.losses.MeanAbsoluteError()
-    elif loss == "MAPE":
-        loss_fn = tf.keras.losses.MeanAbsolutePercentageError()
-    elif loss == "MSLE":
-        loss_fn = tf.keras.losses.MeanSquaredLogarithmicError()
-    elif loss == "Cosine":
-        loss_fn = tf.keras.losses.CosineSimilarity()
-    else:
-        raise NotImplementedError("unknown loss function")
-    #compile the model
-    model.compile(optimizer=kerasOptimizer, 
-                 loss=loss_fn)
+                                    pNrSymbols=nr_symbols,
+                                    pFlankingSize=flankingsize,
+                                    pMaxDist=maxdist,
+                                    pBinsizeFactor=container0.matrix_binsize//container0.feature_binsize)
+    #define optimizer
+    kerasOptimizer = models.getOptimizer(pOptimizerString=optimizer, pLearningrate=learningrate)
+    
+    #build and print the model
+    model.build(input_shape = (windowsize + 2*flankingsize, nr_factors))
     model.summary()
 
-    #callbacks to check the progress etc.
-    tensorboardCallback = tf.keras.callbacks.TensorBoard(log_dir=outputpath)
-    saveFreqInt = int(np.ceil(nr_samples / batchsize) * savefreq)
-    checkpointFilename = os.path.join(outputpath, "checkpoint_{epoch:05d}.h5")
-    checkpointCallback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpointFilename,
-                                                        monitor="val_loss",
-                                                        save_freq=saveFreqInt)
-    earlyStoppingCallback = None
-    if earlystopping is not None:
-        earlyStoppingCallback = tf.keras.callbacks.EarlyStopping(monitor="val_loss",
-                                                            patience=earlystopping,
-                                                            min_delta=0.001,
-                                                            restore_best_weights=True)
-    callback_fns = [tensorboardCallback,
-                checkpointCallback]
-    if earlystopping is not None:
-        callback_fns.append(earlyStoppingCallback)
-    
+    #writers for tensorboard
+    traindatapath = os.path.join(outputpath, "train/")
+    validationDataPath = os.path.join(outputpath, "validation/")
+    if os.path.exists(traindatapath):
+        [os.remove(os.path.join(traindatapath, f)) for f in os.listdir(traindatapath)] 
+    if os.path.exists(validationDataPath):
+        [os.remove(os.path.join(validationDataPath, f)) for f in os.listdir(validationDataPath)]
+    summary_writer_train = tf.summary.create_file_writer(traindatapath)
+    summary_writer_val = tf.summary.create_file_writer(validationDataPath)
+
+     
 
     #save the training parameters to a file before starting to train
     #(allows recovering the parameters even if training is aborted
@@ -319,57 +348,189 @@ def training(trainmatrices,
         dictWriter.writeheader()
         dictWriter.writerow(paramDict)
 
-    #plot the model
+    #plot the model using workaround from tensorflow issue #38988
     modelPlotName = "model.{:s}".format(figuretype)
     modelPlotName = os.path.join(outputpath, modelPlotName)
+    model._layers = [layer for layer in model._layers if isinstance(layer, tf.keras.layers.Layer)] #workaround for plotting with custom loss functions
     tf.keras.utils.plot_model(model,show_shapes=True, to_file=modelPlotName)
     
     #build input streams
+    mirror_idxs = records.get_mirror_indices(windowsize)
     shuffleBufferSize = 3*recordsize
-    shapeDict = dict()
-    shapeDict["feats"] = (3*windowsize,nr_factors)
-    shapeDict["targs"] = ( int(windowsize*(windowsize+1)/2), )
-    if sequencefile is not None:
-        shapeDict["dna"] = (windowsize*binsize,nr_symbols)
-    trainDs = tf.data.TFRecordDataset(trainFilenameList, 
+    trainDs = tf.data.TFRecordDataset(traindataRecords, 
                                         num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                         compression_type="GZIP")
-    trainDs = trainDs.map(lambda x: records.parse_function(x, shapeDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    trainDs = trainDs.map(lambda x: records.parse_function(x, storedFeaturesDict), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    if flipsamples:
+        tds_mirrored = trainDs.map(lambda a, b: records.mirror_function(a["factorData"], b["out_matrixData"], mirror_idxs))
+        if debugstate == "Figures":
+            tk1 = list(trainDs.take(1).as_numpy_iterator())
+            tk2 = list(tds_mirrored.take(1).as_numpy_iterator())
+            tk1_facs = tk1[0][0]["factorData"]
+            tk1_mat = np.zeros((windowsize, windowsize))
+            tk1_mat[np.triu_indices(windowsize)] = tk1[0][1]["out_matrixData"]
+            tk2_facs = tk2[0][0]["factorData"]
+            tk2_mat = np.zeros_like(tk1_mat)
+            tk2_mat[np.triu_indices(windowsize)] = tk2[0][1]["out_matrixData"]
+            fig1, axs1 = plt.subplots(2,2)
+            m1 = axs1[0,0].imshow(np.log(tk1_mat + 1))
+            m2 = axs1[0,1].imshow(np.log(tk2_mat + 1))
+            m3 = axs1[1,0].imshow(tk1_facs, aspect="auto")
+            m4 = axs1[1,1].imshow(tk2_facs, aspect="auto")
+            t1 = axs1[1,0].set_title("standard")
+            t2 = axs1[1,1].set_title("flipped")
+            axs1[1,0].xaxis.set_visible(False)
+            axs1[1,1].xaxis.set_visible(False)
+            flipfigname = "flippedVsStd.{:s}".format(figuretype)
+            flipfigname = os.path.join(outputpath, flipfigname)
+            fig1.savefig(flipfigname)
+            plt.close(fig1)
+            del axs1, fig1, flipfigname, m1, m2, m3, m4, t1, t2
+            del tk1, tk1_facs, tk1_mat, tk2, tk2_facs, tk2_mat
+        trainDs = trainDs.concatenate(tds_mirrored)
     trainDs = trainDs.shuffle(buffer_size=shuffleBufferSize, reshuffle_each_iteration=True)
-    trainDs = trainDs.batch(batchsize)
-    trainDs = trainDs.repeat(numberepochs)
+    trainDs = trainDs.batch(batchsize, drop_remainder=True)
     trainDs = trainDs.prefetch(tf.data.experimental.AUTOTUNE)
-    validationDs = tf.data.TFRecordDataset(validationFilenameList, 
+    validationDs = tf.data.TFRecordDataset(validationdataRecords, 
                                             num_parallel_reads=tf.data.experimental.AUTOTUNE,
                                             compression_type="GZIP")
-    validationDs = validationDs.map(lambda x: records.parse_function(x, shapeDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    validationDs = validationDs.map(lambda x: records.parse_function(x, storedFeaturesDict) , num_parallel_calls=tf.data.experimental.AUTOTUNE)
     validationDs = validationDs.batch(batchsize)
     validationDs = validationDs.prefetch(tf.data.experimental.AUTOTUNE)
 
-    #train the neural network
-    history = model.fit(trainDs,
-              epochs= numberepochs,
-              validation_data= validationDs,
-              callbacks= callback_fns,
-              steps_per_epoch= int(np.ceil(nr_samples / batchsize))
-            )
+    weights_before = model.layers[1].weights[0].numpy()
+
+    #filename for plots
+    lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
+    lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
+    #models for converting predictions as needed
+    percLossMod = models.getPerceptionModel(windowsize)
+    grayscaleMod = models.getGrayscaleConversionModel(scalingFactor=0.999, windowsize=windowsize)
+    #get the per-pixel loss function (also used for perception loss and score loss)
+    loss_fn = models.getPerPixelLoss(loss)
+    #lists to store loss for each epoch
+    trainLossList_epochs = [] 
+    valLossList_epochs = []
+    #iterate over all epochs and batches in the train/validation datasets
+    #compute gradients and update weights accordingly
+    samples_per_epoch = int(np.floor(nr_trainingSamples / batchsize))
+    if flipsamples:
+        samples_per_epoch *= 2
+    for epoch in range(numberepochs):
+        pbar_batch = tqdm(trainDs, total=samples_per_epoch)
+        pbar_batch.set_description("Epoch {:05d}".format(epoch+1))
+        trainLossList_batches = [] #lists to store loss for each batch
+        for x, y in pbar_batch:
+            lossVal = trainStep(creationModel=model, 
+                                grayscaleConversionModel=grayscaleMod, 
+                                factorInputBatch=x, 
+                                targetInputBatch=y, 
+                                optimizer=kerasOptimizer, 
+                                perceptionLossModel=percLossMod,
+                                pixelLossWeight=pixellossweight, 
+                                ssimWeight=structureweight, 
+                                tvWeight=tvweight, 
+                                perceptionWeight=perceptionweight,
+                                scoreWeight=scoreweight,
+                                lossFn = loss_fn
+                                )
+            trainLossList_batches.append(lossVal)
+            pbar_batch.set_postfix( {"loss": "{:.4f}".format(lossVal)} )
+        trainLossList_epochs.append(np.mean(trainLossList_batches))
+        trainLossList_batches = []
+        with summary_writer_train.as_default(): #pylint: disable=not-context-manager
+            tf.summary.scalar('train_loss', trainLossList_epochs[epoch], step=epoch+1)
+        valLossList_batches = []
+        for x,y in validationDs:
+            val_loss = validationStep(creationModel=model, factorInputBatch=x, targetInputBatch=y, pixelLossWeight=pixellossweight )
+            valLossList_batches.append(val_loss)
+        valLossList_epochs.append(np.mean(valLossList_batches))
+        valLossList_batches = []
+        with summary_writer_val.as_default(): #pylint: disable=not-context-manager
+            tf.summary.scalar('validation_loss', valLossList_epochs[epoch], step=epoch+1)
+        #plot loss and save figure every savefreq epochs
+        if (epoch + 1) % savefreq == 0:
+            checkpointFilename = "checkpoint_{:05d}.h5".format(epoch + 1)
+            checkpointFilename = os.path.join(outputpath, checkpointFilename)
+            model.save(filepath=checkpointFilename,save_format="h5")
+            utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
+                    pNameList=["train", "validation"],
+                    pFilename=lossPlotFilename)
+            #save the loss values so that they can be plotted again in different formats later on
+            valLossFilename = "val_loss_{:05d}.npy".format(epoch + 1)
+            trainLossFilename = "train_loss_{:05d}.npy".format(epoch + 1)
+            valLossFilename = os.path.join(outputpath, valLossFilename)
+            trainLossFilename = os.path.join(outputpath, trainLossFilename)
+            np.save(valLossFilename, valLossList_epochs)
+            np.save(trainLossFilename, trainLossList_epochs)
+            del valLossFilename, trainLossFilename
+
+    weights_after = model.layers[1].weights[0].numpy()
+    print("weight sum before", np.sum(weights_before))
+    print("weight sum after", np.sum(weights_after))
 
     #store the trained network
     model.save(filepath=modelfilepath,save_format="h5")
 
-    #plot train- and validation loss over epochs
-    lossPlotFilename = "lossOverEpochs.{:s}".format(figuretype)
-    lossPlotFilename = os.path.join(outputpath, lossPlotFilename)
-    utils.plotHistory(history, lossPlotFilename)
+    #plot final train- and validation loss over epochs
+    utils.plotLoss(pLossValueLists=[trainLossList_epochs, valLossList_epochs],
+                    pNameList=["train", "validation"],
+                    pFilename=lossPlotFilename)
 
     #delete train- and validation records, if debugstate not set
     if debugstate is None or debugstate=="Figures":
-        for trainfile in tqdm(trainFilenameList, desc="Deleting training record files"):
-            if os.path.exists(trainfile):
-                os.remove(trainfile)
-        for validationfile in tqdm(validationFilenameList, desc="Deleting validation record files"):
-            if os.path.exists(validationfile):
-                os.remove(validationfile)
+        for record in tqdm(traindataRecords + validationdataRecords, desc="Deleting TFRecord files"):
+            if os.path.exists(record):
+                os.remove(record)
+
+
+@tf.function
+def trainStep(creationModel, grayscaleConversionModel, factorInputBatch, targetInputBatch, optimizer, pixelLossWeight=0.0, ssimWeight=0.0, tvWeight=0.0, perceptionWeight=0.0, scoreWeight=0.0, perceptionLossModel=None, lossFn=tf.keras.losses.MeanSquaredError()):
+    with tf.GradientTape() as tape:
+        loss = tf.zeros(shape=())
+        predVec = creationModel(factorInputBatch, training=True)
+        trueVec = targetInputBatch['out_matrixData']
+        #per-pixel MSE
+        if pixelLossWeight > 0.0:
+            #loss += tf.reduce_sum( tf.square(trueVec - predVec) ) * pixelLossWeight
+            loss += lossFn(trueVec, predVec)
+        #convert vector batches to grayscale image batches
+        y_true_grayscale = grayscaleConversionModel(trueVec)     
+        y_pred_grayscale = grayscaleConversionModel(predVec)
+        #perception loss based on pre-trained network
+        if perceptionWeight > 0.0:
+            y_true_rgb = tf.image.grayscale_to_rgb(y_true_grayscale)
+            y_pred_rgb = tf.image.grayscale_to_rgb(y_pred_grayscale)
+            predActivations = perceptionLossModel(y_pred_rgb)
+            trueActivations = perceptionLossModel(y_true_rgb)
+            perceptionLoss = lossFn(trueActivations, predActivations)
+            loss += perceptionLoss * perceptionWeight
+        #Total Variation loss
+        if tvWeight > 0.0:
+            tvLoss = tf.reduce_sum(tf.image.total_variation(y_pred_grayscale)) 
+            loss += tvLoss * tvWeight
+        #multiscale structural similarity loss (MS-SSIM)
+        if ssimWeight > 0.0:
+            ssim = tf.image.ssim(y_true_grayscale, y_pred_grayscale, 1., filter_size=5)
+            ssimLoss = 1.0 - tf.reduce_mean(ssim)
+            loss += ssimLoss * ssimWeight
+        #loss based on TAD insulation score
+        if scoreWeight > 0.0:
+            predScore = models.TadInsulationScoreLayer(80,15)(y_pred_grayscale)
+            trueScore = models.TadInsulationScoreLayer(80,15)(y_true_grayscale)
+            scoreLoss = lossFn(trueScore, predScore)
+            loss += scoreLoss * scoreWeight
+    gradients = tape.gradient(loss, creationModel.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, creationModel.trainable_variables))
+    return loss
+
+@tf.function
+def validationStep(creationModel, factorInputBatch, targetInputBatch, pixelLossWeight=1.0, lossFn=tf.keras.losses.MeanSquaredError()):
+    val_loss = tf.zeros(shape=())
+    predVec = creationModel(factorInputBatch, training=False)
+    trueVec = targetInputBatch['out_matrixData']
+    val_loss += lossFn(trueVec,predVec) * pixelLossWeight
+    return val_loss
 
 def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
     modeltypeStr = pModelTypeStr
@@ -382,7 +543,6 @@ def checkSetModelTypeStr(pModelTypeStr, pSequenceFile):
         msg += "Changed model type to >sequence<"
         print(msg)
     return modeltypeStr
-
 
 if __name__ == "__main__":
     training() #pylint: disable=no-value-for-parameter

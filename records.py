@@ -1,38 +1,46 @@
 import tensorflow as tf
-from tensorflow.python.keras import backend
 import numpy as np
 
-#compare following tutorial https://medium.com/@moritzkrger/speeding-up-keras-with-tfrecord-datasets-5464f9836c36
-
 #parse serialized input to tensors
-def parse_function(example_proto, shapeDict):
-    feats = None
-    targs = None
-    dna = None
-    features = {"features": tf.io.FixedLenFeature((), tf.string),
-                "targets": tf.io.FixedLenFeature((), tf.string),
-                "dna": tf.io.FixedLenFeature((), tf.string)}
-    parsed_features = tf.io.parse_single_example(example_proto, features)
-    if "feats" in shapeDict:
-        feats = tf.io.decode_raw(parsed_features['features'], tf.float64)
-        feats = tf.reshape(feats, shapeDict["feats"])
-    if "targs" in shapeDict:
-        targs = tf.io.decode_raw(parsed_features['targets'], tf.float64)
-        targs = tf.reshape(targs, shapeDict["targs"])
-    if "dna" in shapeDict:
-        dna = tf.io.decode_raw(parsed_features['dna'], tf.uint8)
-        dna = tf.reshape(dna, shapeDict["dna"])
-    retList = []
+def parse_function(example_proto, descriptionDict):
     featDict = dict()
-    if feats is not None:
-        featDict["feats"] = feats #chromatin features
-    if dna is not None:
-        featDict["dna"] = dna #dna sequence
+    targetDict = dict()
+    contents = [key for key in descriptionDict]
+    dtypes = [descriptionDict[key]["dtype"] for key in contents]
+    shapes = [descriptionDict[key]["shape"] for key in contents]
+    features = {key: tf.io.FixedLenFeature((), tf.string) for key in contents}
+    parsed_features = tf.io.parse_single_example(example_proto, features)
+    for name, dtype, shape in zip(contents, dtypes, shapes):
+        if name.startswith("out_"):
+            targetDict[name] = tf.reshape( tf.io.decode_raw(parsed_features[name], dtype), shape)
+        else:
+            featDict[name] = tf.reshape( tf.io.decode_raw(parsed_features[name], dtype), shape)
+    retList = []
     if len(featDict) > 0:
         retList.append(featDict)
-    if targs is not None:
-        retList.append(targs)   #target submatrices
+    if len(targetDict) > 0:
+        retList.append(targetDict)
     return tuple(retList)
+
+def mirror_function(tensor1, tensor2, mirror_indices):
+    t1 = tf.reverse(tensor1, axis=[0])
+    t2 = tf.gather(tensor2, mirror_indices)
+    return {"factorData": t1}, {"out_matrixData": t2}
+
+def get_mirror_indices(windowsize):
+    #build up initial matrix from vectorised values of upper triangle
+    initial_matrix = np.zeros((windowsize, windowsize))
+    initial_array = np.arange(windowsize*(windowsize+1)//2)
+    initial_matrix[np.triu_indices(windowsize)] = initial_array
+    #flip initial matrix along its antidiagonal
+    flipped_matrix = np.rot90(np.transpose(initial_matrix), 2)
+    #compute the permutation indices
+    initial_list = list(initial_array)
+    permutated_list = list(flipped_matrix[np.triu_indices(windowsize)])
+    permutation_array = np.array( [permutated_list.index(i) for i in initial_list] )
+    #return the permutation indices. Can be used with tf.gather to permute values
+    return tf.constant(permutation_array)
+    
 
 # helper functions from tensorflow TFRecord docs
 def _bytes_feature(value):
@@ -41,60 +49,25 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 #write tfRecord to disk
-def writeTFRecord(pChromFactorsArray, pDNASequenceArray, pTargetMatricesArray, pFilename):
-    batches = set()
-    if isinstance(pChromFactorsArray, np.ndarray) \
-            and not len(pChromFactorsArray.shape) == 3:
-        msg = "Chrom factors array wrong shape"
-        print(msg)
-        return
-    elif isinstance(pChromFactorsArray, np.ndarray):
-        batches.add( pChromFactorsArray.shape[0] )
-    if isinstance(pDNASequenceArray, np.ndarray) \
-                and not len(pDNASequenceArray.shape) == 3:
-        msg = "DNA seq. array wrong shape"
-        print(msg)
-        return
-    elif isinstance(pDNASequenceArray, np.ndarray):
-        batches.add( pDNASequenceArray.shape[0] )
-    if isinstance(pTargetMatricesArray, np.ndarray) \
-                and not len(pTargetMatricesArray.shape) == 2:
-        msg = "target matrices array wrong shape"
-        print(msg)
-        return
-    elif isinstance(pTargetMatricesArray, np.ndarray):
-        batches.add( pTargetMatricesArray.shape[0] )
-    
-    if len(batches) != 1:
-        msg = "no. of batches wrong or no data"
-        print(msg)
-        return
-    
+def writeTFRecord(pFilename, pRecordDict):
     if not isinstance(pFilename, str):
-        msg = "Filename must be a string"
-        print(msg)
         return
-    if not isinstance(pChromFactorsArray, np.ndarray) \
-            and not isinstance(pDNASequenceArray, np.ndarray) \
-            and not isinstance(pTargetMatricesArray, np.ndarray):
-        msg = "Nothing to write"
-        print(msg)
+    if not isinstance(pRecordDict, dict):
         return
+    for key in pRecordDict:
+        if not isinstance(pRecordDict[key], np.ndarray):
+            return
+    batches = set()
+    for key in pRecordDict:
+        batches.add(pRecordDict[key].shape[0])
+    if len(batches) > 1:
+        msg = "Batch sizes are not equal"
+        raise ValueError(msg)
     
     with tf.io.TFRecordWriter(pFilename, options="GZIP") as writer:
         for i in range(list(batches)[0]):
             feature = dict()
-            if isinstance(pChromFactorsArray, np.ndarray):
-                feature['features'] =  _bytes_feature( pChromFactorsArray[i].flatten().tostring() ),
-            else:
-                feature['features'] = _bytes_feature( np.array([0]).tostring() )
-            if isinstance(pTargetMatricesArray, np.ndarray):
-                feature['targets'] =  _bytes_feature( pTargetMatricesArray[i].flatten().tostring() )
-            else:
-                feature['targets'] = _bytes_feature( np.array([0]).tostring() )
-            if isinstance(pDNASequenceArray, np.ndarray):
-                feature['dna'] = _bytes_feature( pDNASequenceArray[i].flatten().tostring() )
-            else:
-                feature['dna'] = _bytes_feature( np.array([0]).tostring() )
+            for key in pRecordDict:
+                feature[key] = _bytes_feature( pRecordDict[key][i].flatten().tostring() )
             example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(example.SerializeToString())
