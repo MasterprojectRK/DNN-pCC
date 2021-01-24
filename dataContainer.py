@@ -113,7 +113,8 @@ class DataContainer():
             if clampFeatures:
                 tmpArray = utils.clampArray(tmpArray)
             if scaleFeatures:
-                tmpArray = utils.scaleArray(tmpArray)
+                tmpArray = utils.standardizeArray(tmpArray, axis=1)
+                #tmpArray = utils.scaleArray(tmpArray)
             self.FactorDataArray[i] = tmpArray
             nr_nonzero_abs = np.count_nonzero(tmpArray)
             nr_nonzero_perc = nr_nonzero_abs / tmpArray.size * 100

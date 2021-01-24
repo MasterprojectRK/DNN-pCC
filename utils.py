@@ -118,6 +118,25 @@ def scaleArray(pArray):
         normArray = np.zeros_like(pArray)
     return normArray
 
+def standardizeArray(pArray, axis=None):
+    '''
+    standardize 2D array by subtracting mean and dividing by standard deviation
+    '''
+    if axis is not None and axis != 0 and axis != 1:
+        return pArray
+    if len(pArray.shape) != 2:
+        print("Warning: only 2D arrays supported for standardization")
+        return pArray
+    means = np.mean(pArray, axis=axis)
+    stdevs = np.std(pArray, axis=axis)
+    if axis != 1:
+        out_arr = pArray - means
+        out_arr /= stdevs
+    else:
+        out_arr = pArray - means[:,None] #slicing instead of 2x np.transpose
+        out_arr /= stdevs[:,None]
+    return out_arr
+
 def showMatrix(pMatrix):
     #test function to show matrices
     #debug only, not for production use
