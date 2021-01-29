@@ -434,7 +434,8 @@ def computePearsonCorrelation(pCoolerFile1, pCoolerFile2,
                               pWindowsize_bp,
                               pModelChromList, pTargetChromStr,
                               pModelCellLineList, pTargetCellLineStr,
-                              pPlotOutputFile=None, pCsvOutputFile=None):
+                              pPlotOutputFile=None, pCsvOutputFile=None,
+                              pIgnoreBoundarySize: int = 0):
     '''
     compute distance-stratified pearson correlation for target chromosome
     directly from cooler files and plot or write to file
@@ -449,9 +450,10 @@ def computePearsonCorrelation(pCoolerFile1, pCoolerFile2,
         pTargetCellLineStr (str): the target cell line, will appear in plot title
         pPlotOutputFile (str): filename of correlation plot
         pCsvOutputFile (str): filename of correlation csv file
+        pIgnoreBoundarySize (int): ignore the first and last pIgnoreBoundarySize bins (boundary handling)
     
     Returns:
-        None
+        pandas Dataframe with results
     ''' 
 
     sparseMatrix1, binsize1 = getMatrixFromCooler(pCoolerFile1, pTargetChromStr)
@@ -472,6 +474,13 @@ def computePearsonCorrelation(pCoolerFile1, pCoolerFile2,
         errorMsg += "{:s} -- {:d}bp\n"
         errorMsg = errorMsg.format(pCoolerFile1,binsize1, pCoolerFile2, binsize2)
         raise SystemExit(errorMsg)
+    if sparseMatrix1.shape != sparseMatrix2.shape:
+        errorMsg = "Aborting. Matrices do not have the same size. Wrong ref. genome?"
+        raise SystemExit(errorMsg)
+    if pIgnoreBoundarySize > 0 and sparseMatrix1.shape[0] > 2*pIgnoreBoundarySize:
+        #ignore the first and last pIgnoreBoundarySize bins (empty in the prediction)
+        sparseMatrix1 = sparseMatrix1[pIgnoreBoundarySize:-pIgnoreBoundarySize, pIgnoreBoundarySize:-pIgnoreBoundarySize]
+        sparseMatrix2 = sparseMatrix2[pIgnoreBoundarySize:-pIgnoreBoundarySize, pIgnoreBoundarySize:-pIgnoreBoundarySize]
     resultsDf = computePearsonCorrelationSparse(pSparseCsrMatrix1= sparseMatrix1,
                                                 pSparseCsrMatrix2= sparseMatrix2,
                                                 pBinsize= binsize1,

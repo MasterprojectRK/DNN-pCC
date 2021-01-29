@@ -45,6 +45,10 @@ import os
                 type=click.Choice(["pearson", "spearman"]),
                 required=False, default="pearson",
                 help="Correlation method to use")
+@click.option("--boundarySize", "-bs", 
+                type=click.IntRange(min=0), required=False,
+                default=0, show_default=True, 
+                help="Ignore this number of first/last bins; boundary handling")
 @click.command()
 def plotPearsonCorrelation(predmatrix, 
                             legend,
@@ -57,7 +61,8 @@ def plotPearsonCorrelation(predmatrix,
                             keepcsv,
                             csvpath,
                             outfile,
-                            corrmethod):
+                            corrmethod,
+                            boundarysize):
     legendList = []
     if len(legend) == 0:
         legendList = [None for x in predmatrix]
@@ -83,7 +88,8 @@ def plotPearsonCorrelation(predmatrix,
                                                 pModelCellLineList=[modelcelllines],
                                                 pTargetCellLineStr=targetcellline,
                                                 pPlotOutputFile=None,
-                                                pCsvOutputFile=csvFileName))
+                                                pCsvOutputFile=csvFileName,
+                                                pIgnoreBoundarySize=boundarysize))
     utils.plotPearsonCorrelationDf(pResultsDfList=statDfList,
                                     pLegendList=legendList,
                                     pOutfile=outfile,
