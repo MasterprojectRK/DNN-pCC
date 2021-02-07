@@ -38,13 +38,26 @@ def getMatrixFromCooler(pCoolerFilePath, pChromNameStr):
     #returns sparse csr matrix from cooler file for given chromosome name
     sparseMatrix = None
     binSizeInt = 0
+    errorMsg = None
     try:
+        #naming as provided by caller
         coolerMatrix = cooler.Cooler(pCoolerFilePath)
         sparseMatrix = coolerMatrix.matrix(sparse=True,balance=False).fetch(pChromNameStr)
         sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
         binSizeInt = int(coolerMatrix.binsize)
     except Exception as e:
-        print(e)
+        errorMsg = str(e)
+        errorMsg += "\nCould not load chr '{:s}' with current naming scheme, retrying...".format(pChromNameStr)
+    if errorMsg is not None:
+        try:
+            #naming scheme with leading "chr"
+            coolerMatrix = cooler.Cooler(pCoolerFilePath)
+            sparseMatrix = coolerMatrix.matrix(sparse=True,balance=False).fetch("chr" + pChromNameStr)
+            sparseMatrix = sparseMatrix.tocsr() #so it can be sliced later
+            binSizeInt = int(coolerMatrix.binsize)
+        except Exception as e:
+            errorMsg += "\n" + str(e)
+            print(errorMsg)
     return sparseMatrix, binSizeInt
 
 def getChromSizesFromCooler(pCoolerFilePath):
