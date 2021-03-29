@@ -54,7 +54,7 @@ tf.random.set_seed(35)
                 default=1000, show_default=True,
                 help="Number of epochs for training the neural network.")
 @click.option("--batchsize", "-bs", required=True,
-                type=click.IntRange(min=5), 
+                type=click.IntRange(min=2), 
                 default=256, show_default=True,
                 help="Batch size for training the neural network.")
 @click.option("--recordsize", "-rs", required=False,
