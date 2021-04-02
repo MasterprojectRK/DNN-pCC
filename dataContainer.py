@@ -235,14 +235,14 @@ class DataContainer():
         if not isinstance(windowsize, int):
             msg = "windowsize must be integer"
             raise TypeError(msg)
+        self.windowsize = windowsize
+        self.flankingsize = flankingsize
+        self.maxdist = maxdist
         if isinstance(maxdist, int):
             maxdist = np.clip(maxdist, a_min=1, a_max=self.windowsize)
         self.__loadMatrixData(scaleMatrix=scaleTargets)
         self.__loadFactorData(featureBinsize=featureBinsize, scaleFeatures=scaleFeatures, clampFeatures=clampFeatures)
         self.__loadSequenceData()
-        self.windowsize = windowsize
-        self.flankingsize = flankingsize
-        self.maxdist = maxdist
         self.data_loaded = True
 
     def checkCompatibility(self, containerIterable):
