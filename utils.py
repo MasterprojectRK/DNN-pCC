@@ -304,7 +304,10 @@ def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
     diagList = []
     for i in range(pWindowSize_bins):
         diagArr = sparse.csr_matrix.diagonal(pSparseCsrMatrix,i)
-        diagList.append(diagArr/diagArr.mean())
+        meanVal = np.mean(diagArr[diagArr != 0]) #as in Farre et al
+        diagArr /= meanVal
+        diagArr[diagArr == 0] = 1 #as in Farre et al.
+        diagList.append(diagArr)
     distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
     return distNormalizedMatrix
 
