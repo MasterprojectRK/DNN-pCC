@@ -138,7 +138,8 @@ class DataContainer():
             raise IOError(msg)
         #scale to 0..1, if requested
         if scaleMatrix:
-            sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)       
+            #sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)
+            sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, self.windowsize)
         #ensure that chrom sizes for matrix and factors are the same
         if self.chromSize_factors is not None and self.chromSize_factors != chromsize_matrix:
             msg = "Chromsize of matrix does not match bigwig files\n"
