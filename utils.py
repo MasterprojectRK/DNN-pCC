@@ -298,17 +298,19 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
     #write out the cooler
     cooler.create_cooler(pOutfile, bins=bins, pixels=pixelGenerator(pMatrixList=pMatrixList, pOffsetList=offsetList), dtypes={'count': np.float64}, ordered=True, metadata=pMetadata)
 
-def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
+def distanceNormalize(pSparseCsrMatrix: sparse.csr_matrix, pWindowSize_bins: int):
     #compute the means along the diagonals (= same distance)
     #and divide all values on the diagonals by their respective mean
     diagList = []
-    for i in range(pWindowSize_bins):
-        diagArr = sparse.csr_matrix.diagonal(pSparseCsrMatrix,i)
+    winsize = min(pSparseCsrMatrix.shape[0], pWindowSize_bins)
+    winsize = max(winsize, 0) #ensure positivity
+    for i in range(-winsize+1, winsize):
+        diagArr = pSparseCsrMatrix.diagonal(i)
         meanVal = np.mean(diagArr[diagArr != 0]) #as in Farre et al
         diagArr /= meanVal
         diagArr[diagArr == 0] = 1 #as in Farre et al.
         diagList.append(diagArr)
-    distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
+    distNormalizedMatrix = sparse.diags(diagList,np.arange(-winsize+1, winsize),format="csr")
     return distNormalizedMatrix
 
 def plotChromatinFactors(pFactorArray, pFeatureNameList, 
