@@ -305,10 +305,10 @@ def distanceNormalize(pSparseCsrMatrix: sparse.csr_matrix, pWindowSize_bins: int
     winsize = min(pSparseCsrMatrix.shape[0], pWindowSize_bins)
     winsize = max(winsize, 0) #ensure positivity
     for i in range(-winsize+1, winsize):
-        diagArr = pSparseCsrMatrix.diagonal(i)
+        diagArr = pSparseCsrMatrix.diagonal(i).astype("float32")
         meanVal = np.mean(diagArr[diagArr != 0]) #as in Farre et al
         diagArr /= meanVal
-        diagArr[diagArr == 0] = 1 #as in Farre et al.
+        diagArr[diagArr == 0.0] = 1.0 #as in Farre et al.
         diagList.append(diagArr)
     distNormalizedMatrix = sparse.diags(diagList,np.arange(-winsize+1, winsize),format="csr")
     return distNormalizedMatrix
