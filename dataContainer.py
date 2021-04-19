@@ -138,7 +138,8 @@ class DataContainer():
             raise IOError(msg)
         #scale to 0..1, if requested
         if scaleMatrix:
-            sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)       
+            #sparseHiCMatrix = utils.scaleArray(sparseHiCMatrix)
+            sparseHiCMatrix = utils.distanceNormalize(sparseHiCMatrix, self.windowsize)
         #ensure that chrom sizes for matrix and factors are the same
         if self.chromSize_factors is not None and self.chromSize_factors != chromsize_matrix:
             msg = "Chromsize of matrix does not match bigwig files\n"
@@ -234,14 +235,14 @@ class DataContainer():
         if not isinstance(windowsize, int):
             msg = "windowsize must be integer"
             raise TypeError(msg)
+        self.windowsize = windowsize
+        self.flankingsize = flankingsize
+        self.maxdist = maxdist
         if isinstance(maxdist, int):
             maxdist = np.clip(maxdist, a_min=1, a_max=self.windowsize)
         self.__loadMatrixData(scaleMatrix=scaleTargets)
         self.__loadFactorData(featureBinsize=featureBinsize, scaleFeatures=scaleFeatures, clampFeatures=clampFeatures)
         self.__loadSequenceData()
-        self.windowsize = windowsize
-        self.flankingsize = flankingsize
-        self.maxdist = maxdist
         self.data_loaded = True
 
     def checkCompatibility(self, containerIterable):

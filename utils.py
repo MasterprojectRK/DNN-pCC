@@ -298,14 +298,19 @@ def writeCooler(pMatrixList, pBinSizeInt, pOutfile, pChromosomeList, pChromSizeL
     #write out the cooler
     cooler.create_cooler(pOutfile, bins=bins, pixels=pixelGenerator(pMatrixList=pMatrixList, pOffsetList=offsetList), dtypes={'count': np.float64}, ordered=True, metadata=pMetadata)
 
-def distanceNormalize(pSparseCsrMatrix, pWindowSize_bins):
+def distanceNormalize(pSparseCsrMatrix: sparse.csr_matrix, pWindowSize_bins: int):
     #compute the means along the diagonals (= same distance)
     #and divide all values on the diagonals by their respective mean
     diagList = []
-    for i in range(pWindowSize_bins):
-        diagArr = sparse.csr_matrix.diagonal(pSparseCsrMatrix,i)
-        diagList.append(diagArr/diagArr.mean())
-    distNormalizedMatrix = sparse.diags(diagList,np.arange(pWindowSize_bins),format="csr")
+    winsize = min(pSparseCsrMatrix.shape[0], pWindowSize_bins)
+    winsize = max(winsize, 0) #ensure positivity
+    for i in range(-winsize+1, winsize):
+        diagArr = pSparseCsrMatrix.diagonal(i).astype("float32")
+        meanVal = np.mean(diagArr[diagArr != 0]) #as in Farre et al
+        diagArr /= meanVal
+        diagArr[diagArr == 0.0] = 1.0 #as in Farre et al.
+        diagList.append(diagArr)
+    distNormalizedMatrix = sparse.diags(diagList,np.arange(-winsize+1, winsize),format="csr")
     return distNormalizedMatrix
 
 def plotChromatinFactors(pFactorArray, pFeatureNameList, 
@@ -558,6 +563,8 @@ def computePearsonCorrelationSparse(pSparseCsrMatrix1, pSparseCsrMatrix2,
     matrixDf['distance'] = np.uint32(matrixDf['second'] - matrixDf['first'])
     matrixDf['reads1'] = np.float32(reads1)
     matrixDf['reads2'] = np.float32(reads2)
+    if matrixDf.isnull().any().any():
+        print("Info: filled some NANs")
     matrixDf.fillna(0, inplace=True)
 
     pearsonAucIndices, pearsonAucValues = getCorrelation(matrixDf,'distance', 'reads1', 'reads2', 'pearson')
