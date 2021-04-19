@@ -563,6 +563,8 @@ def computePearsonCorrelationSparse(pSparseCsrMatrix1, pSparseCsrMatrix2,
     matrixDf['distance'] = np.uint32(matrixDf['second'] - matrixDf['first'])
     matrixDf['reads1'] = np.float32(reads1)
     matrixDf['reads2'] = np.float32(reads2)
+    if matrixDf.isnull().any().any():
+        print("Info: filled some NANs")
     matrixDf.fillna(0, inplace=True)
 
     pearsonAucIndices, pearsonAucValues = getCorrelation(matrixDf,'distance', 'reads1', 'reads2', 'pearson')
