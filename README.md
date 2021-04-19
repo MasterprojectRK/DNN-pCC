@@ -4,6 +4,9 @@ This repository attempts predicting chromatin conformation in form of so-called 
 The network setup is based on the paper [Dense neural networks for predicting chromatin conformation](https://doi.org/10.1186/s12859-018-2286-z) 
 by Farre, Heurteau, Cuvier and Emberly (2018).
 
+This repository has been created in 2020/2021 as part of a master thesis
+at Albert-Ludwigs university, Freiburg, Germany.
+
 ## Installation
 DNN-pCC is designed to run on Linux operating systems.
 For now, only a manual installation is supported.
@@ -151,6 +154,7 @@ Options:
   - float >= 0.0
   - Weight for perception loss 
   - Default 0.0 means perception loss is not used
+  - Perception loss based on VGG16 works only for window size >= 32
 - --optimizer | -opt: Optimizer to use
   - optional
   - choose from "SGD", "Adam", "RMSprop"
