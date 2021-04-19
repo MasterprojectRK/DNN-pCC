@@ -1,6 +1,6 @@
 # DNN-pCC
 
-This repository attempts predicting chromatin conformation in form of so-called Hi-C matrices from various chromatin factors using a neural network.
+This repository attempts predicting chromatin conformation in form of so-called Hi-C matrices from various chromatin features using a neural network.
 The network setup is based on the paper [Dense neural networks for predicting chromatin conformation](https://doi.org/10.1186/s12859-018-2286-z) 
 by Farre, Heurteau, Cuvier and Emberly (2018).
 
@@ -23,10 +23,22 @@ conda install cooler=0.8.5 pybigwig=0.3.17 scipy=1.5.2 matplotlib=3.3.2 tqdm=4.5
 conda install -c anaconda click=7.1.2 tensorflow-gpu=2.2.0
 ```
 
+## Input data requirements
+
+* Hi-C matrix / matrices in cooler format for training.   
+Cooler files must be single resolution (e.g. 25kbp). 
+Multi-resolution files (mcool) are not supported.
+* Chromatin features in bigwig format for training.    
+Chromatin features and Hi-C matrix for training should be from the same cell line and must use the same reference genome. 
+File extension must be 'bigwig', 'bigWig' or 'bw'.
+* Chromatin features in bigwig format for test / prediction.   
+Chromatin features for prediction must be the same as for training, but of course for the cell line to be predicted. The basic file names must be the same as for training. See example usage for details.
+
+
 ## Usage
 DNN-pCC consists of two modules, training and prediction.
-The training module builds and trains a neural network using an existing Hi-C matrix and a selected number of chromatin factors as inputs.
-The prediction module takes the trained network, inputs the chromatin factors
+The training module builds and trains a neural network using an existing Hi-C matrix and a selected number of chromatin features as inputs.
+The prediction module takes the trained network, inputs the chromatin features
 e.g. from a different cell line or chromosome and thus predicts the
 interaction matrix for the given cell line or chromosome.
 
@@ -44,7 +56,7 @@ Options:
 - --trainChromatinPaths | -tcp: Path to directory with chromatin factor data
   - required
   - multiple paths can be specified (must match number of trainMatrices, see above)
-  - chromatin factors must be in bigwig format
+  - chromatin features must be in bigwig format
   - filenames in the folder are important, make sure to read the notes below
 - --trainChromosomes | -tchroms: The chromosome(s) used for training
   - required
@@ -95,41 +107,73 @@ Options:
 - --scaleMatrix | -scm: Scale matrices
   - required
   - default: False
-  - scale matrices (separately) to value range [0..1] (min-max scaling)
+  - distance-based scaling of matrices (divide by mean for each distance)
   - currently not recommended
-- --clampFactors | -cfac: Clamp chromatin factors 
+- --clampFactors | -cfac: Clamp chromatin features 
   - optional
-  - clamp chromatin factors (separately) to value range lowerQuartile-1.5xInterquartile...upperQuartile+1.5xInterquartile
+  - clamp chromatin features (separately) to value range lowerQuartile-1.5xInterquartile...upperQuartile+1.5xInterquartile
   - experimental, currently not recommended
-- --scaleFactors | -scf: Scale chromatin factors
+- --scaleFactors | -scf: Scale chromatin features
   - optional
-  - scale chromatin factors (separately) to value range [0..1] (min-max scaling)
+  - scale chromatin features (separately) to value range [0..1] (min-max scaling)
   - default: True
   - recommended
+- --binsizeFactors | -bsf: Bin size in basepairs for chromatin features
+  - required
+  - relation matrix_binsize : bsf must be the same integer for all train/validation matrices
+  - must be specified for each training / validation chromatin path, in the same order
 - --modelType | -mod: Model type
   - optional
   - choose from "initial", "wider", "longer", "wider-longer", "sequence"
   - default: "initial"
   - experimental feature, using "initial" is recommended
+- --scoreWeight | -scw
+  - optional
+  - float >= 0.0
+  - Weight for insulation score loss
+  - Default 0.0 means score loss is not used
+- --scoreSize | -ssz
+  - optional
+  - integer >= 1 
+  - Size for computation of insulation score loss. Must be (much) smaller than windowsize. Only relevant, if scoreWeight > 0
+- --tvWeight | -tvw
+  - optional
+  - float >= 0.0
+  - Weight for Total Variation loss. 
+  - Default 0.0 means TV loss is not used
+- --structureWeight | -stw
+  - optional
+  - float >= 0.0
+  - Weight for MS-SSIM loss. 
+  - Default 0.0 means MS-SSIM loss is not used
+- --perceptionWeight | -pcw
+  - optional
+  - float >= 0.0
+  - Weight for perception loss 
+  - Default 0.0 means perception loss is not used
 - --optimizer | -opt: Optimizer to use
   - optional
   - choose from "SGD", "Adam", "RMSprop"
   - default: "SGD" 
   - SGD is recommended in conjunction with small learning rates, e.g. 1e-5
+- --pixelLossWeight | -plw
+  - optional
+  - float >= 0.0
+  - default 1.0
+  - Weight for per-pixel loss
+  - default of 1.0 should not be exceeded in most cases
 - --loss | -l: Loss function to use for optimizing
   - optional
-  - choose from "MSE", "MAE", "MAPE", "MSLE", "Cosine"
+  - choose from "MSE", "Huber0.1", "Huber0.5", "Huber1.0", "Huber5.0", "Huber10.0" "Huber100.0", "Huber1000.0", "MAE", "MAPE", "MSLE", "Cosine"
   - default: "MSE"
   - refer to [Keras documentation](https://keras.io/api/losses/regression_losses/) for more information on losses
   - MSE (Mean Squared Error) is recommended
 - --earlyStopping | -early: Patience for early stopping
-  - optional
-  - stop training prematurely if the validation loss has not been improving for the given number of epochs
-  - default: no early stopping is used (i.e. the network will be trained for the number of epochs given in -ep option)
+  - this option is currently ignored
 - --debugState | -dbs: Debug state
   - optional
   - choose from "0", "Figures"
-  - "Figures" will add some figures to the outfolder specified above, e.g. boxplots for the chromatin factors
+  - "Figures" will add some figures to the outfolder specified above, e.g. boxplots for the chromatin features
   - experimental feature, usage not recommended
 - --figureType | -ft: Figure type
   - optional
@@ -142,8 +186,12 @@ Options:
   - integer in [1..1000]
   - default: 50
   - values smaller than 20 not recommended
-  - the checkpoints can be used for prediction e.g. if the training process crashes or
-  overfits
+  - the checkpoints can be used for prediction e.g. if the training process crashes or overfits
+- --flipsamples
+  - optional
+  - boolean
+  - default: False
+  - Flip samples (data augmentation)
 
 Outputs:
 - trained Model
@@ -180,7 +228,7 @@ Options:
   - allows evaluating the performance of the network for known outputs
 - --chromatinPath | -cp: Path to directory with chromatin factor data
   - required
-  - chromatin factors must be in bigwig format
+  - chromatin features must be in bigwig format
   - filenames in the folder are important, make sure to read the notes below
 - --sequenceFile | -sf: Text file containing DNA sequence
   - this option is normally ignored
@@ -209,19 +257,19 @@ Outputs:
 - if a target matrix is provided, the evaluation loss is computed and printed to stdout, but currently not stored anywhere. Redirect output to a file, if required.
 
 ## Notes:
-- Bigwig files which represent the same chromatin factor, e.g. CTCF, H3K9me3 and so on, must have the same filename in the training folder and the prediction folder. For three factors, for example, one might have the following structure:
+- Bigwig files which represent the same chromatin factor, e.g. CTCF, H3K9me3 and so on, must have the same filename in the training folder and the prediction folder. For three features, for example, one might have the following structure:
 ```
-./TrainingFactors/
-./TrainingFactors/factor1.bigwig
-./TrainingFactors/factor2.bigwig
-./TrainingFactors/factor3.bigwig
+./Trainingfeatures/
+./Trainingfeatures/factor1.bigwig
+./Trainingfeatures/factor2.bigwig
+./Trainingfeatures/factor3.bigwig
 
-./PredictionFactors/
-./PredictionFactors/factor1.bigwig
-./PredictionFactors/factor2.bigwig
-./PredictionFactors/factor3.bigwig
+./Predictionfeatures/
+./Predictionfeatures/factor1.bigwig
+./Predictionfeatures/factor2.bigwig
+./Predictionfeatures/factor3.bigwig
 ```
-- The actual name of the factors ("factor1.bigwig", "factor2.bigwig", "factor3.bigwig" in the example) does not matter, but it must be the same in the training folder and the prediction folder. Also see structure and filenames of example data provided in the repository under "train_test_data/".
+- The actual name of the features ("factor1.bigwig", "factor2.bigwig", "factor3.bigwig" in the example) does not matter, but it must be the same in the training folder and the prediction folder. Also see structure and filenames of example data provided in the repository under "train_test_data/".
 - It is possible - but probably useless - to use the same chromosome multiple times for training and validation
 - Too large values for the learning rate will make the network diverge or run into NAN losses
 - Small values for the learning rate are recommended because the absolute values of the loss can become very large, causing numerical problems. Try e.g. learning rates of 10e-4.
@@ -249,8 +297,8 @@ Note that for the sake of simplicity, the same chromosome is used for training a
 The input files required for DNN-pCC can either be downloaded from the relevant sources or be created from raw experiment data using open source tools.
 See below for detailed instructions how the example files provided in this repository have been created.
 
-## Chromatin factors / Bigwig files
-The chromatin factor data have been downloaded from [UCSC](https://hgdownload.cse.ucsc.edu/goldenPath/hg19/encodeDCC/wgEncodeBroadHistone/) in bam format and processed with `samtools`, `bamCoverage` and `bigwigCompare` as follows:
+## Chromatin features / Bigwig files
+The chromatin factor data provided in this repository (train_test_data) have been downloaded from [UCSC](https://hgdownload.cse.ucsc.edu/goldenPath/hg19/encodeDCC/wgEncodeBroadHistone/) in bam format and processed with `samtools`, `bamCoverage` and `bigwigCompare` as follows:
 
 ```
 #bash-style code
@@ -279,7 +327,7 @@ bigwigCompare ${COMMAND}
 ```
 
 ## Hi-C matrices
-Hi-C matrices have been downloaded in hic-format from the gene expression omnibus (GEO), accession key GSE63525 (data from Rao et al. 2014). Here, the "combined_30" versions have been used, which contain only high-quality reads.
+Hi-C matrices provided in this repository (train_test_data) have been downloaded in hic-format from the gene expression omnibus (GEO), accession key GSE63525 (data from Rao et al. 2014). Here, the "combined_30" versions have been used, which contain only high-quality reads.
 All matrices have then been coverted to cooler format using `hic2cool convert`
 ```
 hic2cool convert -r 25000 $INFILE $OUTFILE
