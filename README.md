@@ -8,6 +8,8 @@ This repository has been created in 2020/2021 as part of a master thesis
 at Albert-Ludwigs university, Freiburg, Germany.
 
 ## Installation
+All code is available under the GPLv3 license provided. Parts of the code have originally been written by Andre Bajorat in 2019 and are licensed under the MIT license (see utils.py).
+
 DNN-pCC is designed to run on Linux operating systems.
 For now, only a manual installation is supported.
 To install DNN-pCC, just clone the github repository to some local directory 
